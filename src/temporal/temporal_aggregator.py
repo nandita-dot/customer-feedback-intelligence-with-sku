@@ -1,112 +1,61 @@
 import pandas as pd
-from typing import Dict
 
-
-print("LOADING TEMPORAL AGGREGATOR")
 
 class TemporalAggregator:
-    """
-    Aggregates sentiment and topic metrics over time.
-    """
 
-    def __init__(
-        self,
-        date_column: str = "date",
-        sentiment_column: str = "compound_score",
-        topic_column: str = "topic_id"
-    ):
-
-        self.date_column = date_column
-        self.sentiment_column = sentiment_column
-        self.topic_column = topic_column
-
-    def prepare_datetime(
-        self,
-        df: pd.DataFrame
-    ) -> pd.DataFrame:
-        """
-        Ensure datetime format.
-        """
+    def aggregate_monthly(self, df: pd.DataFrame):
 
         df = df.copy()
 
-        df[self.date_column] = pd.to_datetime(
-            df[self.date_column],
-            errors="coerce"
-        )
+        # safety checks
+        required = ["date", "compound_score", "topic_id", "sku"]
 
-        df = df.dropna(
-            subset=[self.date_column]
-        )
+        for col in required:
+            if col not in df.columns:
+                raise ValueError(f"Missing required column: {col}")
 
-        return df
+        df["month"] = df["date"].dt.to_period("M").astype(str)
 
-    def aggregate_monthly(
-        self,
-        df: pd.DataFrame
-    ) -> Dict:
-        """
-        Monthly aggregation:
-        - average sentiment
-        - dominant topic
-        - topic frequencies
-        """
-
-        df = self.prepare_datetime(df)
-
-        # -----------------------------
-        # Extract monthly period
-        # -----------------------------
-        df["month"] = (
-            df[self.date_column]
-            .dt.to_period("M")
-            .astype(str)
-        )
-
-        # -----------------------------
-        # Average sentiment
-        # -----------------------------
-        sentiment_trend = (
-            df.groupby("month")[
-                self.sentiment_column
-            ]
+        # -----------------------
+        # Sentiment trend
+        # -----------------------
+        monthly_sentiment = (
+            df.groupby("month")["compound_score"]
             .mean()
-            .reset_index(name="avg_sentiment")
+            .reset_index()
+            .rename(columns={"compound_score": "avg_sentiment"})
         )
 
-        # -----------------------------
-        # Topic frequencies
-        # -----------------------------
+        # -----------------------
+        # Topic frequency
+        # -----------------------
         topic_frequencies = (
-            df.groupby(
-                ["month", self.topic_column]
-            )
+            df.groupby(["month", "topic_id"])
             .size()
             .reset_index(name="frequency")
         )
 
-        # -----------------------------
-        # Dominant topic per month
-        # -----------------------------
-        dominant_topics = (
-            topic_frequencies.loc[
-                topic_frequencies.groupby("month")[
-                    "frequency"
-                ].idxmax()
-            ]
-            .reset_index(drop=True)
+        # -----------------------
+        # SKU + Topic frequency (IMPORTANT)
+        # -----------------------
+        sku_topic_frequencies = (
+            df.groupby(["month", "sku", "topic_id"])
+            .size()
+            .reset_index(name="frequency")
         )
 
-        dominant_topics = dominant_topics.rename(
-            columns={
-                self.topic_column: "dominant_topic"
-            }
+        # -----------------------
+        # Dominant topic per month
+        # -----------------------
+        dominant_topics = (
+            topic_frequencies.loc[
+                topic_frequencies.groupby("month")["frequency"].idxmax()
+            ]
         )
 
         return {
-            "monthly_sentiment": sentiment_trend,
+            "monthly_sentiment": monthly_sentiment,
             "topic_frequencies": topic_frequencies,
+            "sku_topic_frequencies": sku_topic_frequencies,  # 🔥 REQUIRED
             "dominant_topics": dominant_topics
         }
-    
-print(TemporalAggregator)
