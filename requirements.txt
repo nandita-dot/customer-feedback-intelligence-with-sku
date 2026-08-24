@@ -1,0 +1,10 @@
+pandas
+numpy
+nltk
+spacy
+gensim
+scikit-learn
+vaderSentiment
+streamlit
+plotly
+scipy

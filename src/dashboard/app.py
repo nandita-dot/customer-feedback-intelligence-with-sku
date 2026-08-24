@@ -3,160 +3,429 @@ import pandas as pd
 import plotly.express as px
 
 from src.run_pipeline import run_pipeline
+from src.temporal.temporal_aggregator import (
+    TemporalAggregator
+)
 
+from src.explainability.explainer import (
+    InsightExplainer
+)
 
-# -------------------------------------------------
-# CONFIG
-# -------------------------------------------------
+# ---------------------------------------------------
+# PAGE CONFIG
+# ---------------------------------------------------
+
 st.set_page_config(
-    page_title="Customer Intelligence System",
+    page_title="Customer Intelligence Dashboard",
     layout="wide"
 )
 
-st.title("Customer Feedback Intelligence System")
-st.markdown("Topic + Sentiment + Drift + SKU Intelligence Dashboard")
-
-
-# -------------------------------------------------
-# SIDEBAR
-# -------------------------------------------------
-st.sidebar.header("Controls")
-
-threshold = st.sidebar.slider(
-    "Drift Threshold",
-    min_value=0.0,
-    max_value=1.0,
-    value=0.80,
-    step=0.01
+st.title(
+    "Customer Feedback Intelligence System"
 )
 
+st.markdown(
+    """
+AI-powered temporal topic analysis,
+sentiment monitoring,
+SKU hotspot detection,
+and drift analytics.
+"""
+)
 
-# -------------------------------------------------
-# UPLOAD
-# -------------------------------------------------
+# ---------------------------------------------------
+# FILE UPLOAD
+# ---------------------------------------------------
+
 uploaded_file = st.file_uploader(
-    "Upload Customer Reviews CSV",
+    "Upload CSV",
     type=["csv"]
 )
 
+if uploaded_file is not None:
 
-# -------------------------------------------------
-# MAIN APP
-# -------------------------------------------------
-if uploaded_file:
+    # ---------------------------------------------------
+    # LOAD RAW DATA
+    # ---------------------------------------------------
 
-    # -----------------------------
-    # Load raw CSV
-    # -----------------------------
     raw_df = pd.read_csv(uploaded_file)
 
-    st.subheader("Raw Data Preview")
+    st.subheader("Raw Dataset")
+
     st.dataframe(raw_df.head())
 
-    required_cols = ["review", "date", "sku"]
+    # ---------------------------------------------------
+    # RUN NLP PIPELINE
+    # ---------------------------------------------------
 
-    missing = [c for c in required_cols if c not in raw_df.columns]
+    with st.spinner(
+        "Running NLP intelligence pipeline..."
+    ):
 
-    if missing:
-        st.error(f"Missing columns: {missing}")
+        results = run_pipeline(raw_df)
+
+    # ---------------------------------------------------
+    # EXTRACT RESULTS
+    # ---------------------------------------------------
+
+    df = results["processed_df"]
+
+    topics_df = results["topics_df"]
+
+    drift_results = results["drift_results"]
+
+    # ---------------------------------------------------
+    # SAFETY FIXES
+    # ---------------------------------------------------
+
+    if "date" not in df.columns:
+        st.error("Missing 'date' column")
         st.stop()
 
-    # -----------------------------
-    # Save temp file for pipeline
-    # -----------------------------
-    temp_path = "temp_upload.csv"
-    raw_df.to_csv(temp_path, index=False)
+    if "topic_id" not in df.columns:
+        st.error("Missing 'topic_id' column")
+        st.stop()
 
-    # -----------------------------
-    # RUN FULL PIPELINE
-    # -----------------------------
-    df, results = run_pipeline(temp_path)
+    if "compound_score" not in df.columns:
+        st.error("Missing 'compound_score' column")
+        st.stop()
 
-    st.success("Pipeline executed successfully")
+    # ---------------------------------------------------
+    # CREATE MONTH COLUMN
+    # ---------------------------------------------------
 
-    # -----------------------------
-    # SHOW PROCESSED DATA
-    # -----------------------------
-    st.subheader("Processed Data (Enriched)")
-    st.dataframe(df.head())
+    df["date"] = pd.to_datetime(
+        df["date"],
+        errors="coerce"
+    )
 
+    df = df.dropna(subset=["date"])
 
-    # =================================================
-    # SENTIMENT TREND
-    # =================================================
-    st.subheader("Monthly Sentiment Trend")
+    df["month"] = (
+        df["date"]
+        .dt.to_period("M")
+        .astype(str)
+    )
+
+    # ---------------------------------------------------
+    # FIX TOPIC LABEL ISSUE
+    # ---------------------------------------------------
+
+    topic_mapping = dict(
+        zip(
+            topics_df["topic_id"],
+            topics_df["topic_label"]
+        )
+    )
+
+    df["topic_label"] = (
+        df["topic_id"]
+        .map(topic_mapping)
+    )
+
+    # ---------------------------------------------------
+    # TEMPORAL AGGREGATION
+    # ---------------------------------------------------
+
+    aggregator = TemporalAggregator()
+
+    aggregation_results = (
+        aggregator.aggregate_monthly(df)
+    )
+
+    sentiment_df = (
+        aggregation_results[
+            "monthly_sentiment"
+        ]
+    )
+
+    topic_frequency_df = (
+        aggregation_results[
+            "topic_frequencies"
+        ]
+    )
+
+    # ---------------------------------------------------
+    # ADD TOPIC LABELS TO TOPIC FREQUENCY DF
+    # ---------------------------------------------------
+
+    topic_frequency_df["topic_label"] = (
+        topic_frequency_df["topic_id"]
+        .map(topic_mapping)
+    )
+
+    # ---------------------------------------------------
+    # KPI METRICS
+    # ---------------------------------------------------
+
+    st.subheader("Key Metrics")
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+
+        st.metric(
+            "Total Reviews",
+            len(df)
+        )
+
+    with col2:
+
+        st.metric(
+            "Discovered Topics",
+            df["topic_id"].nunique()
+        )
+
+    with col3:
+
+        avg_sentiment = round(
+            df["compound_score"].mean(),
+            3
+        )
+
+        st.metric(
+            "Average Sentiment",
+            avg_sentiment
+        )
+
+    # ---------------------------------------------------
+    # TOPIC TABLE
+    # ---------------------------------------------------
+
+    st.subheader(
+        "Discovered Topics"
+    )
+
+    st.dataframe(topics_df)
+
+    # ---------------------------------------------------
+    # SENTIMENT TREND GRAPH
+    # ---------------------------------------------------
+
+    st.subheader(
+        "Monthly Sentiment Trend"
+    )
 
     fig_sentiment = px.line(
-        results["monthly_sentiment"],
+        sentiment_df,
         x="month",
         y="avg_sentiment",
         markers=True
     )
 
-    st.plotly_chart(fig_sentiment, use_container_width=True)
+    st.plotly_chart(
+        fig_sentiment,
+        use_container_width=True
+    )
 
+    st.info(
+        """
+This graph shows how customer sentiment changes over time.
 
-    # =================================================
-    # TOPIC FREQUENCY
-    # =================================================
-    st.subheader("Topic Trends Over Time")
+Positive movement upward:
+customers becoming happier.
+
+Negative movement downward:
+growing dissatisfaction.
+"""
+    )
+
+    # ---------------------------------------------------
+    # TOPIC TRENDS
+    # ---------------------------------------------------
+
+    st.subheader(
+        "Topic Trends Over Time"
+    )
 
     fig_topics = px.line(
-        results["topic_frequencies"],
+        topic_frequency_df,
         x="month",
         y="frequency",
-        color="topic_id",
+        color="topic_label",
         markers=True
     )
 
-    st.plotly_chart(fig_topics, use_container_width=True)
-
-    st.dataframe(results["topic_frequencies"])
-
-
-    # =================================================
-    # SKU LEVEL ANALYSIS (IMPORTANT ADDITION)
-    # =================================================
-    st.subheader("SKU-Level Topic Hotspots")
-
-    st.dataframe(results["sku_topic_frequencies"])
-
-    selected_sku = st.selectbox(
-        "Select SKU",
-        sorted(df["sku"].unique())
+    st.plotly_chart(
+        fig_topics,
+        use_container_width=True
     )
 
-    sku_df = df[df["sku"] == selected_sku]
+    st.info(
+        """
+This graph shows which customer issues
+or discussion themes are growing over time.
 
-    st.markdown(f"### Reviews for SKU: `{selected_sku}`")
-
-    st.dataframe(
-        sku_df[["review", "topic_id", "compound_score", "date"]]
+A sudden spike usually indicates:
+- operational problems
+- product defects
+- pricing complaints
+- delivery failures
+- support overload
+"""
     )
 
+    # ---------------------------------------------------
+    # SKU HOTSPOTS
+    # ---------------------------------------------------
 
-    # =================================================
-    # DRIFT (SAFE HANDLING)
-    # =================================================
-    st.subheader("Drift Monitoring")
+    if "sku" in df.columns:
 
-    if "topic_frequencies" in results:
+        st.subheader(
+            "SKU Complaint Hotspots"
+        )
 
-        drift_df = results["topic_frequencies"]
+        sku_summary = (
+            df.groupby("sku")
+            .agg(
+                avg_sentiment=(
+                    "compound_score",
+                    "mean"
+                ),
+                total_reviews=(
+                    "review",
+                    "count"
+                )
+            )
+            .reset_index()
+        )
 
-        if len(drift_df["month"].unique()) < 2:
-            st.warning("Not enough data for drift detection")
-        else:
-            st.dataframe(drift_df)
+        sku_summary = (
+            sku_summary.sort_values(
+                "avg_sentiment"
+            )
+        )
 
-    # =================================================
-    # SUMMARY
-    # =================================================
-    st.subheader("System Summary")
+        st.dataframe(sku_summary)
 
-    st.write("Total Reviews:", len(df))
-    st.write("Total SKUs:", df["sku"].nunique())
-    st.write("Topics Found:", df["topic_id"].nunique())
+        fig_sku = px.bar(
+            sku_summary,
+            x="sku",
+            y="avg_sentiment"
+        )
+
+        st.plotly_chart(
+            fig_sku,
+            use_container_width=True
+        )
+
+        st.info(
+            """
+Low sentiment SKUs indicate
+problematic products.
+
+This helps companies identify:
+- defect-heavy products
+- bad suppliers
+- shipping issues
+- packaging problems
+"""
+        )
+
+    # ---------------------------------------------------
+    # DRIFT DETECTION
+    # ---------------------------------------------------
+
+    st.subheader(
+        "Topic Drift Detection"
+    )
+
+    similarity_df = (
+        drift_results[
+            "similarity_scores"
+        ]
+    )
+
+    if not similarity_df.empty:
+
+        fig_drift = px.line(
+            similarity_df,
+            x="current_month",
+            y="cosine_similarity",
+            markers=True
+        )
+
+        st.plotly_chart(
+            fig_drift,
+            use_container_width=True
+        )
+
+        st.info(
+            """
+Drift measures how much customer discussion changes over time.
+
+High similarity:
+customers discussing the same issues.
+
+Low similarity:
+new problems or changing priorities emerging.
+"""
+        )
+
+    # ---------------------------------------------------
+    # DRIFT ALERTS
+    # ---------------------------------------------------
+
+    st.subheader(
+        "Drift Alerts"
+    )
+
+    alerts = drift_results["alerts"]
+
+    if alerts:
+
+        for alert in alerts:
+
+            st.warning(alert)
+
+    else:
+
+        st.success(
+            "No major topic drift detected."
+        )
+
+    # ---------------------------------------------------
+    # EXPLAINABILITY LAYER
+    # ---------------------------------------------------
+
+    st.subheader(
+        "AI Business Insights"
+    )
+
+    explainer = InsightExplainer()
+
+    insight_1 = (
+        explainer.explain_sentiment(
+            sentiment_df
+        )
+    )
+
+    insight_2 = (
+        explainer.explain_topic_growth(
+            topic_frequency_df
+        )
+    )
+
+    st.markdown(
+        f"### Sentiment Insight\n{insight_1}"
+    )
+
+    st.markdown(
+        f"### Topic Insight\n{insight_2}"
+    )
+
+    # ---------------------------------------------------
+    # RAW PROCESSED DATA
+    # ---------------------------------------------------
+
+    st.subheader(
+        "Processed Dataset"
+    )
+
+    st.dataframe(df.head(50))
 
 else:
-    st.info("Upload a CSV file to start analysis")
+
+    st.info(
+        "Upload a CSV file to begin."
+    )

@@ -1,61 +1,128 @@
+# src/temporal/temporal_aggregator.py
+
 import pandas as pd
 
 
 class TemporalAggregator:
 
-    def aggregate_monthly(self, df: pd.DataFrame):
+    def aggregate_monthly(
+        self,
+        df: pd.DataFrame,
+        group_by: str = None
+    ):
 
         df = df.copy()
 
-        # safety checks
-        required = ["date", "compound_score", "topic_id", "sku"]
+        df["date"] = pd.to_datetime(
+            df["date"],
+            errors="coerce"
+        )
 
-        for col in required:
-            if col not in df.columns:
-                raise ValueError(f"Missing required column: {col}")
+        df = df.dropna(subset=["date"])
 
-        df["month"] = df["date"].dt.to_period("M").astype(str)
+        df["month"] = (
+            df["date"]
+            .dt.to_period("M")
+            .astype(str)
+        )
 
-        # -----------------------
-        # Sentiment trend
-        # -----------------------
+        # ----------------------------------------
+        # Monthly sentiment
+        # ----------------------------------------
+
+        sentiment_group_cols = ["month"]
+
+        if group_by:
+            sentiment_group_cols.append(
+                group_by
+            )
+
         monthly_sentiment = (
-            df.groupby("month")["compound_score"]
+            df.groupby(sentiment_group_cols)[
+                "compound_score"
+            ]
             .mean()
             .reset_index()
-            .rename(columns={"compound_score": "avg_sentiment"})
         )
 
-        # -----------------------
-        # Topic frequency
-        # -----------------------
+        monthly_sentiment.rename(
+            columns={
+                "compound_score":
+                "avg_sentiment"
+            },
+            inplace=True
+        )
+
+        # ----------------------------------------
+        # Topic frequencies
+        # ----------------------------------------
+
+        topic_group_cols = [
+            "month",
+            "topic_id",
+            "topic_label"
+        ]
+
+        if group_by:
+            topic_group_cols.insert(
+                1,
+                group_by
+            )
+
         topic_frequencies = (
-            df.groupby(["month", "topic_id"])
+            df.groupby(topic_group_cols)
             .size()
             .reset_index(name="frequency")
         )
 
-        # -----------------------
-        # SKU + Topic frequency (IMPORTANT)
-        # -----------------------
-        sku_topic_frequencies = (
-            df.groupby(["month", "sku", "topic_id"])
-            .size()
-            .reset_index(name="frequency")
-        )
+        # ----------------------------------------
+        # Dominant topics
+        # ----------------------------------------
 
-        # -----------------------
-        # Dominant topic per month
-        # -----------------------
         dominant_topics = (
-            topic_frequencies.loc[
-                topic_frequencies.groupby("month")["frequency"].idxmax()
-            ]
+            topic_frequencies
+            .sort_values(
+                "frequency",
+                ascending=False
+            )
+            .groupby("month")
+            .first()
+            .reset_index()
         )
+
+        # ----------------------------------------
+        # SKU Hotspots
+        # ----------------------------------------
+
+        sku_topic_frequencies = None
+
+        if "sku" in df.columns:
+
+            sku_topic_frequencies = (
+                df.groupby(
+                    [
+                        "sku",
+                        "topic_label"
+                    ]
+                )
+                .size()
+                .reset_index(name="count")
+                .sort_values(
+                    "count",
+                    ascending=False
+                )
+            )
 
         return {
-            "monthly_sentiment": monthly_sentiment,
-            "topic_frequencies": topic_frequencies,
-            "sku_topic_frequencies": sku_topic_frequencies,  # 🔥 REQUIRED
-            "dominant_topics": dominant_topics
+            "monthly_sentiment":
+            monthly_sentiment,
+
+            "topic_frequencies":
+            topic_frequencies,
+
+            "dominant_topics":
+            dominant_topics,
+
+            "sku_topic_frequencies":
+            sku_topic_frequencies
         }
