@@ -1,46 +1,49 @@
 from typing import List
+
 import pandas as pd
 import numpy as np
 
 from sklearn.metrics.pairwise import cosine_similarity
 
-print("LOADING TOPIC DRIFT DETECTOR")
 
 class TopicDriftDetector:
+
     """
-    Detects topic distribution drift across months
-    using cosine similarity.
+    Detects temporal concept drift using:
+
+    1. Topic distribution change
+    2. Sentiment change
+    3. Review volume change
+
+    Cosine similarity remains the primary
+    semantic distribution similarity measure.
     """
 
     def __init__(
         self,
-        threshold: float = 0.75
+        threshold=0.80
     ):
 
         self.threshold = threshold
 
+    # ---------------------------------------------------
+    # BUILD TOPIC DISTRIBUTION
+    # ---------------------------------------------------
+
     def build_topic_distribution(
         self,
-        df: pd.DataFrame
-    ) -> pd.DataFrame:
-        """
-        Build normalized topic distributions
-        for each month.
-        """
-
-        # -----------------------------------
-        # Count topic frequencies
-        # -----------------------------------
+        df
+    ):
 
         distribution = (
-            df.groupby(["month", "topic_id"])
+            df.groupby(
+                ["month", "topic_id"]
+            )
             .size()
-            .unstack(fill_value=0)
+            .unstack(
+                fill_value=0
+            )
         )
-
-        # -----------------------------------
-        # Normalize rows
-        # -----------------------------------
 
         distribution = distribution.div(
             distribution.sum(axis=1),
@@ -49,16 +52,20 @@ class TopicDriftDetector:
 
         return distribution
 
+    # ---------------------------------------------------
+    # COSINE SIMILARITY
+    # ---------------------------------------------------
+
     def compute_similarity(
         self,
-        topic_distribution: pd.DataFrame
-    ) -> pd.DataFrame:
-        """
-        Compute cosine similarity between
-        consecutive months.
-        """
+        topic_distribution
+    ):
 
-        months = topic_distribution.index.tolist()
+        months = (
+            topic_distribution
+            .index
+            .tolist()
+        )
 
         results = []
 
@@ -86,72 +93,232 @@ class TopicDriftDetector:
                 curr_vector
             )[0][0]
 
+            topic_drift = (
+                1 - similarity
+            )
+
             results.append({
-                "previous_month": previous_month,
-                "current_month": current_month,
-                "cosine_similarity": round(
-                    similarity,
-                    4
-                ),
-                "drift_detected": (
+
+                "previous_month":
+                    previous_month,
+
+                "current_month":
+                    current_month,
+
+                "cosine_similarity":
+                    round(similarity, 4),
+
+                "topic_drift":
+                    round(topic_drift, 4),
+
+                "drift_detected":
                     similarity < self.threshold
-                )
             })
 
         return pd.DataFrame(results)
 
+    # ---------------------------------------------------
+    # SENTIMENT DRIFT
+    # ---------------------------------------------------
+
+    def compute_sentiment_drift(
+        self,
+        df
+    ):
+
+        monthly = (
+            df.groupby("month")
+            .agg(
+                avg_sentiment=(
+                    "compound_score",
+                    "mean"
+                ),
+                review_count=(
+                    "review",
+                    "count"
+                )
+            )
+            .reset_index()
+        )
+
+        monthly["sentiment_change"] = (
+            monthly["avg_sentiment"]
+            .diff()
+            .abs()
+        )
+
+        monthly["volume_change"] = (
+            monthly["review_count"]
+            .pct_change()
+            .abs()
+            .replace(
+                [np.inf, -np.inf],
+                np.nan
+            )
+            .fillna(0)
+        )
+
+        return monthly
+
+    # ---------------------------------------------------
+    # COMBINED DRIFT
+    # ---------------------------------------------------
+
+    def build_combined_drift(
+        self,
+        similarity_df,
+        sentiment_df
+    ):
+
+        if similarity_df.empty:
+            return similarity_df
+
+        result = similarity_df.copy()
+
+        sentiment_lookup = (
+            sentiment_df[
+                [
+                    "month",
+                    "sentiment_change",
+                    "volume_change"
+                ]
+            ]
+            .rename(
+                columns={
+                    "month":
+                        "current_month"
+                }
+            )
+        )
+
+        result = result.merge(
+            sentiment_lookup,
+            on="current_month",
+            how="left"
+        )
+
+        result["sentiment_change"] = (
+            result["sentiment_change"]
+            .fillna(0)
+        )
+
+        result["volume_change"] = (
+            result["volume_change"]
+            .fillna(0)
+        )
+
+        # Normalize sentiment and volume changes
+        max_sentiment = max(
+            result["sentiment_change"].max(),
+            1e-9
+        )
+
+        max_volume = max(
+            result["volume_change"].max(),
+            1e-9
+        )
+
+        result["sentiment_drift"] = (
+            result["sentiment_change"]
+            / max_sentiment
+        )
+
+        result["volume_drift"] = (
+            result["volume_change"]
+            / max_volume
+        )
+
+        # Combined Concept Drift Score
+        result["concept_drift_score"] = (
+            0.60 *
+            result["topic_drift"]
+            +
+            0.25 *
+            result["sentiment_drift"]
+            +
+            0.15 *
+            result["volume_drift"]
+        )
+
+        result["concept_drift_detected"] = (
+            result["concept_drift_score"] >= 0.35
+        )
+
+        return result
+
+    # ---------------------------------------------------
+    # ALERT GENERATION
+    # ---------------------------------------------------
+
     def generate_alerts(
         self,
-        similarity_df: pd.DataFrame
-    ) -> List[str]:
-        """
-        Generate drift alerts.
-        """
+        drift_df
+    ):
 
         alerts = []
 
-        drift_rows = similarity_df[
-            similarity_df["drift_detected"] == True
-        ]
+        if drift_df.empty:
+            return alerts
 
-        for _, row in drift_rows.iterrows():
+        for _, row in drift_df.iterrows():
 
-            alert = (
-                f"[ALERT] Topic drift detected "
-                f"between {row['previous_month']} "
-                f"and {row['current_month']} "
-                f"(similarity="
-                f"{row['cosine_similarity']})"
-            )
+            if row["concept_drift_detected"]:
 
-            alerts.append(alert)
+                alerts.append(
+                    f"[ALERT] Significant customer "
+                    f"feedback drift detected between "
+                    f"{row['previous_month']} and "
+                    f"{row['current_month']} "
+                    f"(drift score="
+                    f"{row['concept_drift_score']:.2f})"
+                )
 
         return alerts
 
+    # ---------------------------------------------------
+    # COMPLETE PIPELINE
+    # ---------------------------------------------------
+
     def detect_drift(
         self,
-        df: pd.DataFrame
+        df
     ):
-        """
-        Full topic drift detection pipeline.
-        """
 
         topic_distribution = (
             self.build_topic_distribution(df)
         )
 
-        similarity_df = self.compute_similarity(
-            topic_distribution
+        similarity_df = (
+            self.compute_similarity(
+                topic_distribution
+            )
         )
 
-        alerts = self.generate_alerts(
-            similarity_df
+        sentiment_df = (
+            self.compute_sentiment_drift(df)
+        )
+
+        combined_df = (
+            self.build_combined_drift(
+                similarity_df,
+                sentiment_df
+            )
+        )
+
+        alerts = (
+            self.generate_alerts(
+                combined_df
+            )
         )
 
         return {
-            "topic_distribution": topic_distribution,
-            "similarity_scores": similarity_df,
-            "alerts": alerts
+
+            "topic_distribution":
+                topic_distribution,
+
+            "similarity_scores":
+                combined_df,
+
+            "alerts":
+                alerts
         }
-    
-print(TopicDriftDetector)

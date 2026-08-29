@@ -1,52 +1,68 @@
 class TopicLabeler:
-    """
-    Converts raw topic keywords into
-    business-friendly labels.
-    """
 
     keyword_map = {
+
         "delivery": [
-            "delivery",
-            "shipping",
-            "arrive",
-            "tracking",
-            "package"
+            "delivery", "shipping",
+            "arrive", "tracking",
+            "package", "shipment",
+            "delay", "delayed"
         ],
 
         "pricing": [
-            "price",
-            "pricing",
-            "affordable",
-            "expensive",
-            "discount",
-            "money",
-            "value"
+            "price", "pricing",
+            "expensive", "cheap",
+            "discount", "cost",
+            "money", "value"
         ],
 
         "quality": [
-            "quality",
-            "premium",
-            "material",
-            "broke",
-            "cheap",
-            "durable"
+            "quality", "material",
+            "broke", "broken",
+            "durable", "defect",
+            "damage", "damaged"
         ],
 
         "support": [
-            "support",
-            "service",
-            "customer",
-            "respond",
-            "staff",
-            "helpful"
+            "support", "service",
+            "customer", "respond",
+            "staff", "helpful",
+            "response"
+        ],
+
+        "payment": [
+            "payment", "pay",
+            "transaction", "card",
+            "refund", "checkout",
+            "billing"
+        ],
+
+        "product_performance": [
+            "performance", "slow",
+            "fast", "speed",
+            "crash", "freeze",
+            "lag", "working"
+        ],
+
+        "usability": [
+            "easy", "difficult",
+            "interface", "app",
+            "website", "navigation",
+            "login"
+        ],
+
+        "packaging": [
+            "package", "packaging",
+            "box", "wrapped",
+            "packing"
         ]
     }
 
     @classmethod
-    def generate_label(cls, topic_words):
-        """
-        Generate label from topic keywords.
-        """
+    def generate_label(
+        cls,
+        topic_words
+    ):
 
         topic_words = [
             str(word).lower()
@@ -55,10 +71,13 @@ class TopicLabeler:
 
         scores = {}
 
-        for label, keywords in cls.keyword_map.items():
+        for label, keywords in (
+            cls.keyword_map.items()
+        ):
 
             overlap = len(
-                set(topic_words).intersection(
+                set(topic_words)
+                .intersection(
                     set(keywords)
                 )
             )

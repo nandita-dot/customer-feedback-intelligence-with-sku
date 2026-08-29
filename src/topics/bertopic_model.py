@@ -4,14 +4,13 @@ from bertopic import BERTopic
 class BERTopicModel:
 
     def __init__(self):
-
         self.model = BERTopic(
             verbose=False
         )
 
         self.topics = None
-
         self.probabilities = None
+        self.temporal_topics = None
 
     # ---------------------------------------------------
     # TRAIN MODEL
@@ -20,21 +19,15 @@ class BERTopicModel:
     def fit(self, documents):
 
         self.topics, self.probabilities = (
-            self.model.fit_transform(
-                documents
-            )
+            self.model.fit_transform(documents)
         )
 
     # ---------------------------------------------------
-    # GET TOPIC IDS
+    # GET TOPICS FOR DOCUMENTS
     # ---------------------------------------------------
 
-    def get_topics_for_documents(
-        self,
-        documents
-    ):
+    def get_topics_for_documents(self, documents):
 
-        # if already trained
         if self.topics is not None:
             return self.topics
 
@@ -43,6 +36,27 @@ class BERTopicModel:
         )
 
         return topics
+
+    # ---------------------------------------------------
+    # TEMPORAL TOPIC MODELING
+    # ---------------------------------------------------
+
+    def topics_over_time(
+        self,
+        documents,
+        timestamps
+    ):
+
+        self.temporal_topics = (
+            self.model.topics_over_time(
+                documents,
+                timestamps,
+                evolution_tuning=True,
+                global_tuning=True
+            )
+        )
+
+        return self.temporal_topics
 
     # ---------------------------------------------------
     # GET KEYWORDS
@@ -55,20 +69,16 @@ class BERTopicModel:
     ):
 
         topic_words = (
-            self.model.get_topic(
-                topic_id
-            )
+            self.model.get_topic(topic_id)
         )
 
         if topic_words is None:
             return []
 
-        keywords = [
+        return [
             word
             for word, _ in topic_words[:top_n]
         ]
-
-        return keywords
 
     # ---------------------------------------------------
     # GET TOPIC INFO
