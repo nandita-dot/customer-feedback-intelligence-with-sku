@@ -3,17 +3,20 @@ import numpy as np
 
 
 class SeverityScorer:
-
     """
     Calculates a Severity Impact Score (SIS)
-    for customer issues.
+    for customer business issues.
 
-    Factors:
+    Multiple BERTopic topic IDs may have the same
+    business-friendly topic label.
 
-    - Negative sentiment
-    - Topic volume
-    - Topic growth
-    - Drift
+    Example:
+
+        Topic 2 -> delivery
+        Topic 5 -> delivery
+
+    These are combined into one business issue
+    before calculating severity.
     """
 
     def __init__(
@@ -40,6 +43,7 @@ class SeverityScorer:
         maximum = series.max()
 
         if maximum == minimum:
+
             return pd.Series(
                 0.5,
                 index=series.index
@@ -50,6 +54,100 @@ class SeverityScorer:
             /
             (maximum - minimum)
         )
+
+    # ---------------------------------------------------
+    # COMBINE SAME BUSINESS ISSUES
+    # ---------------------------------------------------
+
+    @staticmethod
+    def aggregate_business_issues(topic_df):
+
+        if topic_df.empty:
+            return pd.DataFrame()
+
+        df = topic_df.copy()
+
+        # Make sure labels are consistent
+        df["topic_label"] = (
+            df["topic_label"]
+            .fillna("general_feedback")
+            .astype(str)
+            .str.strip()
+            .str.lower()
+        )
+
+        # ------------------------------------------------
+        # Combine multiple BERTopic IDs having the same
+        # business label.
+        # ------------------------------------------------
+
+        grouped = (
+            df.groupby(
+                ["month", "topic_label"],
+                as_index=False
+            )
+            .agg(
+                frequency=(
+                    "frequency",
+                    "sum"
+                ),
+
+                negative_reviews=(
+                    "negative_ratio",
+                    lambda x: 0
+                ),
+
+                topic_sentiment=(
+                    "topic_sentiment",
+                    "mean"
+                ),
+
+                negative_ratio=(
+                    "negative_ratio",
+                    "mean"
+                )
+            )
+        )
+
+        # ------------------------------------------------
+        # Recalculate business-level growth.
+        # ------------------------------------------------
+
+        grouped = (
+            grouped
+            .sort_values(
+                ["topic_label", "month"]
+            )
+            .reset_index(drop=True)
+        )
+
+        grouped["previous_frequency"] = (
+            grouped
+            .groupby("topic_label")["frequency"]
+            .shift(1)
+        )
+
+        grouped["growth_rate"] = (
+            (
+                grouped["frequency"]
+                -
+                grouped["previous_frequency"]
+            )
+            /
+            grouped["previous_frequency"]
+            .replace(0, 1)
+        )
+
+        grouped["growth_rate"] = (
+            grouped["growth_rate"]
+            .replace(
+                [np.inf, -np.inf],
+                0
+            )
+            .fillna(0)
+        )
+
+        return grouped
 
     # ---------------------------------------------------
     # CALCULATE SEVERITY
@@ -64,20 +162,29 @@ class SeverityScorer:
         if topic_df.empty:
             return pd.DataFrame()
 
-        df = topic_df.copy()
+        # =================================================
+        # BUSINESS-LEVEL AGGREGATION
+        # =================================================
 
-        # ------------------------------------------------
-        # NEGATIVITY
-        # ------------------------------------------------
+        df = self.aggregate_business_issues(
+            topic_df
+        )
+
+        if df.empty:
+            return pd.DataFrame()
+
+        # =================================================
+        # NEGATIVE SENTIMENT
+        # =================================================
 
         df["negative_impact"] = (
             df["negative_ratio"]
             .clip(0, 1)
         )
 
-        # ------------------------------------------------
+        # =================================================
         # VOLUME
-        # ------------------------------------------------
+        # =================================================
 
         df["volume_score"] = (
             self.normalize(
@@ -85,9 +192,9 @@ class SeverityScorer:
             )
         )
 
-        # ------------------------------------------------
+        # =================================================
         # GROWTH
-        # ------------------------------------------------
+        # =================================================
 
         df["growth_score"] = (
             self.normalize(
@@ -96,72 +203,96 @@ class SeverityScorer:
             )
         )
 
-        # ------------------------------------------------
+        # =================================================
         # DRIFT
-        # ------------------------------------------------
+        # =================================================
 
-        drift_lookup = (
-            drift_df[
-                [
-                    "current_month",
-                    "concept_drift_score"
+        if (
+            drift_df is not None
+            and not drift_df.empty
+            and "concept_drift_score" in drift_df.columns
+        ):
+
+            drift_lookup = (
+                drift_df[
+                    [
+                        "current_month",
+                        "concept_drift_score"
+                    ]
                 ]
-            ]
-            .rename(
-                columns={
-                    "current_month":
-                        "month"
-                }
+                .rename(
+                    columns={
+                        "current_month": "month"
+                    }
+                )
             )
-        )
 
-        df = df.merge(
-            drift_lookup,
-            on="month",
-            how="left"
-        )
+            # There should normally be one drift score
+            # per month.
+            drift_lookup = (
+                drift_lookup
+                .drop_duplicates(
+                    subset=["month"]
+                )
+            )
+
+            df = df.merge(
+                drift_lookup,
+                on="month",
+                how="left"
+            )
+
+        else:
+
+            df["concept_drift_score"] = 0
 
         df["concept_drift_score"] = (
             df["concept_drift_score"]
             .fillna(0)
+            .clip(0, 1)
         )
 
-        # ------------------------------------------------
+        # =================================================
         # SEVERITY IMPACT SCORE
-        # ------------------------------------------------
+        # =================================================
 
         df["severity_score"] = (
 
             self.sentiment_weight
-            * df["negative_impact"]
+            *
+            df["negative_impact"]
 
             +
 
             self.volume_weight
-            * df["volume_score"]
+            *
+            df["volume_score"]
 
             +
 
             self.growth_weight
-            * df["growth_score"]
+            *
+            df["growth_score"]
 
             +
 
             self.drift_weight
-            * df["concept_drift_score"]
+            *
+            df["concept_drift_score"]
         )
 
-        # ------------------------------------------------
-        # SCALE TO 0-100
-        # ------------------------------------------------
+        # =================================================
+        # SCALE 0-100
+        # =================================================
 
         df["severity_score"] = (
-            df["severity_score"] * 100
+            df["severity_score"]
+            * 100
         ).round(2)
 
-        # ------------------------------------------------
+        # =================================================
         # SEVERITY CATEGORY
-        # ------------------------------------------------
+        # =================================================
 
         def classify(score):
 
@@ -181,7 +312,21 @@ class SeverityScorer:
             .apply(classify)
         )
 
-        return df.sort_values(
-            "severity_score",
-            ascending=False
+        # =================================================
+        # FINAL SORT
+        # =================================================
+
+        return (
+            df
+            .sort_values(
+                [
+                    "month",
+                    "severity_score"
+                ],
+                ascending=[
+                    True,
+                    False
+                ]
+            )
+            .reset_index(drop=True)
         )

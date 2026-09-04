@@ -510,75 +510,99 @@ else:
 
 st.markdown("---")
 
-st.markdown(
-    "## What Needs Attention?"
+st.header(
+    "What Needs Attention?"
 )
 
-if not latest_severity_df.empty:
+if not recommendation_df.empty:
 
-    top_issue = latest_severity_df.iloc[0]
-
-    issue_name = top_issue["topic_label"]
-
-    severity = top_issue["severity_score"]
-
-    frequency = top_issue.get(
-        "frequency",
-        0
+    attention_row = (
+        recommendation_df
+        .sort_values(
+            "severity_score",
+            ascending=False
+        )
+        .iloc[0]
     )
 
-    negative_ratio = top_issue.get(
-        "negative_ratio",
-        0
+    attention_topic = (
+        str(attention_row["topic_label"])
+        .replace("_", " ")
+        .title()
     )
 
-    growth = top_issue.get(
-        "growth_rate",
-        0
+    attention_score = float(
+        attention_row["severity_score"]
     )
+
+    attention_level = (
+        attention_row["severity_level"]
+    )
+
+    attention_frequency = (
+        attention_row.get(
+            "frequency",
+            0
+        )
+    )
+
+    attention_negative_ratio = (
+        attention_row.get(
+            "negative_ratio",
+            0
+        )
+    )
+
+    attention_growth = (
+        attention_row.get(
+            "growth_rate",
+            0
+        )
+    )
+
+    if attention_level == "Critical":
+
+        st.error(
+            f"🔴 **{attention_topic}** — "
+            f"{attention_score:.1f}/100 — "
+            f"{attention_level}"
+        )
+
+    elif attention_level == "High":
+
+        st.warning(
+            f"🟠 **{attention_topic}** — "
+            f"{attention_score:.1f}/100 — "
+            f"{attention_level}"
+        )
+
+    else:
+
+        st.info(
+            f"🟡 **{attention_topic}** — "
+            f"{attention_score:.1f}/100 — "
+            f"{attention_level}"
+        )
 
     st.markdown(
         f"""
-        <div class="insight-box">
+**Why is this receiving attention?**
 
-        <div class="small-label">Highest Priority Issue</div>
+- Severity score: **{attention_score:.1f}/100**
+- Reviews in the latest period: **{int(attention_frequency)}**
+- Negative review ratio: **{float(attention_negative_ratio) * 100:.1f}%**
+- Growth rate: **{float(attention_growth) * 100:.1f}%**
 
-        <h3>{issue_name}</h3>
-
-        <p>
-        This issue has a severity score of
-        <b>{severity:.1f}/100</b>.
-        It appears in approximately
-        <b>{int(frequency):,}</b> reviews in the latest period,
-        with a negative-review ratio of
-        <b>{negative_ratio * 100:.1f}%</b>.
-        </p>
-
-        </div>
-        """,
-        unsafe_allow_html=True
+**Recommended action:**  
+{attention_row["recommendation"]}
+"""
     )
-
-    if growth > 0:
-
-        st.info(
-            f"📈 The issue is growing compared with its previous period "
-            f"({growth * 100:.1f}% growth)."
-        )
-
-    elif growth < 0:
-
-        st.success(
-            f"📉 The issue is declining compared with its previous period "
-            f"({abs(growth) * 100:.1f}% decrease)."
-        )
 
 else:
 
     st.info(
-        "No issue-prioritization data is available."
+        "No customer issue currently requires attention."
     )
-
 
 # =========================================================
 # SECTION 1 — CUSTOMER HEALTH
@@ -1240,10 +1264,67 @@ st.markdown(
 
 if not topics_df.empty:
 
-    topic_display = topics_df.copy()
+    display_topics = topics_df.copy()
+
+    # =====================================================
+    # BUSINESS-LEVEL TOPIC VIEW
+    # =====================================================
+
+    display_topics["topic_label"] = (
+        display_topics["topic_label"]
+        .fillna("general_feedback")
+        .astype(str)
+        .str.replace("_", " ")
+        .str.title()
+    )
+
+    # Combine BERTopic topics that received the same
+    # business label.
+    business_topics = (
+        display_topics
+        .groupby(
+            "topic_label",
+            as_index=False
+        )
+        .agg(
+            ber_topic_count=(
+                "topic_id",
+                "nunique"
+            ),
+            keywords=(
+                "keywords",
+                lambda x: ", ".join(
+                    dict.fromkeys(
+                        word.strip()
+                        for value in x
+                        for word in str(value).split(",")
+                    )
+                )
+            )
+        )
+    )
+
+    business_topics = (
+        business_topics
+        .sort_values(
+            "ber_topic_count",
+            ascending=False
+        )
+        .reset_index(drop=True)
+    )
+
+    business_topics = (
+        business_topics.rename(
+            columns={
+                "topic_label": "Business Issue",
+                "ber_topic_count": "Detected Topic Groups",
+                "keywords": "Representative Keywords"
+            }
+        )
+    )
 
     st.dataframe(
-        topic_display,
+        business_topics,
         use_container_width=True,
         hide_index=True
     )
