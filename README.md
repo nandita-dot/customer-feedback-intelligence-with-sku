@@ -11,9 +11,7 @@
 
 ## Dashboard Preview
 
-![Customer Feedback Intelligence Dashboard](assets/dashboard-preview.png)
-
-> **Tip:** Replace `assets/dashboard-preview.png` with a screenshot of your actual Streamlit dashboard. A real product screenshot is strongly recommended over a generic AI image.
+![Customer Feedback Intelligence Dashboard](https://github.com/nandita-dot/customer-feedback-intelligence-with-sku/blob/master/assests/dashboard-preview.png)
 
 ---
 
