@@ -4,7 +4,10 @@ from bertopic import BERTopic
 class BERTopicModel:
 
     def __init__(self):
+
         self.model = BERTopic(
+            min_topic_size=2,
+            nr_topics=None,
             verbose=False
         )
 
