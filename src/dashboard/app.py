@@ -11,8 +11,54 @@ from src.explainability.explainer import InsightExplainer
 # =========================================================
 
 st.set_page_config(
-    page_title="Customer Intelligence Dashboard",
+    page_title="Customer Feedback Intelligence",
     layout="wide"
+)
+
+
+# =========================================================
+# CUSTOM CSS
+# =========================================================
+
+st.markdown(
+    """
+    <style>
+
+    .main-title {
+        font-size: 2.2rem;
+        font-weight: 700;
+        margin-bottom: 0.2rem;
+    }
+
+    .subtitle {
+        color: #6b7280;
+        font-size: 1rem;
+        margin-bottom: 1.5rem;
+    }
+
+    .section-title {
+        font-size: 1.45rem;
+        font-weight: 650;
+        margin-top: 1rem;
+    }
+
+    .insight-box {
+        padding: 1rem 1.2rem;
+        border-radius: 10px;
+        background-color: #f7f7f7;
+        margin-bottom: 1rem;
+    }
+
+    .small-label {
+        font-size: 0.8rem;
+        color: #6b7280;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True
 )
 
 
@@ -20,18 +66,19 @@ st.set_page_config(
 # TITLE
 # =========================================================
 
-st.title(
-    "Customer Feedback Intelligence System"
+st.markdown(
+    '<div class="main-title">Customer Feedback Intelligence System</div>',
+    unsafe_allow_html=True
 )
 
 st.markdown(
     """
-### AI-Powered Customer Intelligence
-
-Temporal topic modelling • Sentiment monitoring •
-Concept drift detection • Issue severity scoring •
-Corrective recommendations
-"""
+    <div class="subtitle">
+    AI-powered analysis of customer sentiment, discussion topics,
+    changing feedback patterns, issue severity and corrective actions.
+    </div>
+    """,
+    unsafe_allow_html=True
 )
 
 
@@ -40,13 +87,6 @@ Corrective recommendations
 # =========================================================
 
 st.sidebar.title("Dashboard Controls")
-
-st.sidebar.markdown(
-    """
-Use the controls below to explore customer feedback
-intelligence generated from the uploaded dataset.
-"""
-)
 
 uploaded_file = st.sidebar.file_uploader(
     "Upload Customer Feedback CSV",
@@ -61,33 +101,33 @@ uploaded_file = st.sidebar.file_uploader(
 if uploaded_file is None:
 
     st.info(
-        "Upload a CSV file from the sidebar to begin analysis."
+        "Upload a customer feedback CSV file from the sidebar to begin."
     )
 
     st.markdown(
         """
-### Expected Dataset
+        ### Expected Dataset
 
-Your CSV should contain at least:
+        Required columns:
 
-- `review`
-- `date`
+        - `review`
+        - `date`
 
-Optional:
+        Optional:
 
-- `sku`
+        - `sku`
 
-### Analysis Pipeline
+        ### Intelligence Pipeline
 
-**Customer Reviews**
-→ Text Preprocessing
-→ Sentiment Analysis
-→ BERTopic
-→ Temporal Topic Modelling
-→ Concept Drift Detection
-→ Severity Impact Scoring
-→ Corrective Recommendations
-"""
+        **Customer Reviews**
+        → Preprocessing
+        → Sentiment Analysis
+        → BERTopic
+        → Temporal Analysis
+        → Concept Drift
+        → Severity Scoring
+        → Recommendations
+        """
     )
 
     st.stop()
@@ -99,35 +139,31 @@ Optional:
 
 try:
 
-    raw_df = pd.read_csv(
-        uploaded_file
-    )
+    raw_df = pd.read_csv(uploaded_file)
 
 except Exception as e:
 
     st.error(
-        f"Unable to read CSV file: {e}"
+        f"Unable to read CSV: {e}"
     )
 
     st.stop()
 
 
 # =========================================================
-# RAW DATA PREVIEW
+# RAW DATA
 # =========================================================
 
-with st.expander(
-    "View Raw Dataset",
-    expanded=False
-):
+with st.expander("View Raw Dataset"):
 
     st.dataframe(
         raw_df.head(20),
-        use_container_width=True
+        use_container_width=True,
+        hide_index=True
     )
 
     st.caption(
-        f"Dataset contains {len(raw_df):,} records."
+        f"{len(raw_df):,} records loaded."
     )
 
 
@@ -141,14 +177,12 @@ with st.spinner(
 
     try:
 
-        results = run_pipeline(
-            raw_df
-        )
+        results = run_pipeline(raw_df)
 
     except Exception as e:
 
         st.error(
-            "An error occurred while running the NLP pipeline."
+            "The customer intelligence pipeline could not be completed."
         )
 
         st.exception(e)
@@ -160,41 +194,31 @@ with st.spinner(
 # EXTRACT RESULTS
 # =========================================================
 
-df = results["processed_df"]
+df = results["processed_df"].copy()
 
-topics_df = results["topics_df"]
+topics_df = results["topics_df"].copy()
 
-aggregation_results = (
-    results["aggregation_results"]
-)
+aggregation_results = results["aggregation_results"]
 
-sentiment_df = (
-    aggregation_results["monthly_sentiment"]
-)
+sentiment_df = aggregation_results[
+    "monthly_sentiment"
+].copy()
 
-topic_frequency_df = (
-    aggregation_results["topic_frequencies"]
-)
+topic_frequency_df = aggregation_results[
+    "topic_frequencies"
+].copy()
 
-drift_results = (
-    results["drift_results"]
-)
+drift_results = results["drift_results"]
 
-severity_df = (
-    results["severity_df"]
-)
+severity_df = results["severity_df"].copy()
 
-recommendation_df = (
-    results["recommendation_df"]
-)
-
-temporal_topics = (
-    results.get("temporal_topics")
-)
+recommendation_df = results[
+    "recommendation_df"
+].copy()
 
 
 # =========================================================
-# DATA VALIDATION
+# VALIDATION
 # =========================================================
 
 required_columns = [
@@ -213,8 +237,7 @@ missing_columns = [
 if missing_columns:
 
     st.error(
-        f"Required columns missing from processed data: "
-        f"{missing_columns}"
+        f"Required processed columns are missing: {missing_columns}"
     )
 
     st.stop()
@@ -244,6 +267,8 @@ df["month"] = (
 # TOPIC LABEL MAPPING
 # =========================================================
 
+topic_mapping = {}
+
 if not topics_df.empty:
 
     topic_mapping = dict(
@@ -253,128 +278,102 @@ if not topics_df.empty:
         )
     )
 
-    df["topic_label"] = (
-        df["topic_id"]
-        .map(topic_mapping)
-        .fillna("outlier")
-    )
-
-else:
-
-    df["topic_label"] = "outlier"
-
-
-# =========================================================
-# DASHBOARD HEADER
-# =========================================================
-
-st.markdown("---")
-
-st.subheader(
-    "Executive Intelligence Overview"
+df["topic_label"] = (
+    df["topic_id"]
+    .map(topic_mapping)
+    .fillna("outlier")
 )
 
 
 # =========================================================
-# KPI CALCULATIONS
+# LATEST MONTH
+# =========================================================
+
+latest_month = df["month"].max()
+
+previous_month = None
+
+available_months = sorted(
+    df["month"].unique()
+)
+
+if len(available_months) >= 2:
+
+    previous_month = available_months[-2]
+
+
+# =========================================================
+# EXECUTIVE METRICS
 # =========================================================
 
 total_reviews = len(df)
 
-valid_topics = (
-    df.loc[
-        df["topic_id"] != -1,
-        "topic_id"
-    ]
-    .nunique()
-)
+valid_topics = df.loc[
+    df["topic_id"] != -1,
+    "topic_id"
+].nunique()
 
 average_sentiment = (
-    df["compound_score"]
-    .mean()
+    df["compound_score"].mean()
 )
 
 negative_percentage = (
     (
-        df["sentiment_label"]
-        == "negative"
-    )
-    .mean()
-    * 100
+        df["sentiment_label"] == "negative"
+    ).mean() * 100
 )
 
 
-# ---------------------------------------------------------
-# Latest Drift
-# ---------------------------------------------------------
+# =========================================================
+# LATEST MONTH SENTIMENT
+# =========================================================
 
-latest_drift = 0
+latest_df = df[
+    df["month"] == latest_month
+]
 
-drift_status = "Stable"
+latest_sentiment = (
+    latest_df["compound_score"].mean()
+)
 
-if (
-    not drift_results["similarity_scores"].empty
-):
-
-    latest_drift_row = (
-        drift_results["similarity_scores"]
-        .iloc[-1]
-    )
-
-    latest_drift = (
-        latest_drift_row
-        .get(
-            "concept_drift_score",
-            0
-        )
-    )
-
-    if latest_drift >= 0.60:
-
-        drift_status = "Critical"
-
-    elif latest_drift >= 0.35:
-
-        drift_status = "Elevated"
-
-    else:
-
-        drift_status = "Stable"
+latest_negative_percentage = (
+    (
+        latest_df["sentiment_label"] == "negative"
+    ).mean() * 100
+)
 
 
-# ---------------------------------------------------------
-# Highest Severity
-# ---------------------------------------------------------
+# =========================================================
+# SEVERITY
+# =========================================================
+
+latest_severity_df = pd.DataFrame()
 
 highest_severity = 0
 
-highest_issue = "None"
+highest_issue = "No major issue"
 
 if not severity_df.empty:
 
-    latest_month = (
-        severity_df["month"].max()
-    )
+    latest_severity_df = severity_df[
+        severity_df["month"] == latest_month
+    ].copy()
 
     latest_severity_df = (
-        severity_df[
-            severity_df["month"]
-            == latest_month
-        ]
+        latest_severity_df
+        .sort_values(
+            "severity_score",
+            ascending=False
+        )
     )
 
     if not latest_severity_df.empty:
 
         highest_row = (
-            latest_severity_df
-            .sort_values(
-                "severity_score",
-                ascending=False
-            )
-            .iloc[0]
+            latest_severity_df.iloc[0]
         )
 
-        highest_severity = (
+        highest_severity = float(
             highest_row["severity_score"]
         )
 
@@ -384,12 +383,63 @@ if not severity_df.empty:
 
 
 # =========================================================
-# KPI DISPLAY
+# DRIFT
 # =========================================================
 
-col1, col2, col3, col4, col5 = (
-    st.columns(5)
+similarity_df = drift_results[
+    "similarity_scores"
+].copy()
+
+latest_drift = 0
+
+drift_status = "Stable"
+
+if not similarity_df.empty:
+
+    latest_drift_row = (
+        similarity_df.iloc[-1]
+    )
+
+    latest_drift = float(
+        latest_drift_row.get(
+            "concept_drift_score",
+            0
+        )
+    )
+
+    if latest_drift >= 0.60:
+
+        drift_status = "Critical Change"
+
+    elif latest_drift >= 0.35:
+
+        drift_status = "Elevated Change"
+
+    else:
+
+        drift_status = "Stable"
+
+
+# =========================================================
+# EXECUTIVE HEADER
+# =========================================================
+
+st.markdown("---")
+
+st.markdown(
+    "## Executive Intelligence Overview"
 )
+
+st.caption(
+    f"Current analysis period: **{latest_month}**"
+)
+
+
+# =========================================================
+# KPI CARDS
+# =========================================================
+
+col1, col2, col3, col4, col5 = st.columns(5)
 
 with col1:
 
@@ -401,28 +451,28 @@ with col1:
 with col2:
 
     st.metric(
-        "Discovered Topics",
+        "Topics Discovered",
         valid_topics
     )
 
 with col3:
 
     st.metric(
-        "Average Sentiment",
-        f"{average_sentiment:.3f}"
+        "Current Sentiment",
+        f"{latest_sentiment:.2f}"
     )
 
 with col4:
 
     st.metric(
         "Negative Reviews",
-        f"{negative_percentage:.1f}%"
+        f"{latest_negative_percentage:.1f}%"
     )
 
 with col5:
 
     st.metric(
-        "Top Issue Severity",
+        "Highest Issue Severity",
         f"{highest_severity:.1f}/100"
     )
 
@@ -434,43 +484,115 @@ with col5:
 if highest_severity >= 75:
 
     st.error(
-        f"🔴 CRITICAL ISSUE: "
-        f"{highest_issue} has a severity score of "
-        f"{highest_severity:.1f}/100."
+        f"🔴 **Immediate attention required:** "
+        f"{highest_issue} is the highest-priority customer issue "
+        f"with a severity score of {highest_severity:.1f}/100."
     )
 
 elif highest_severity >= 50:
 
     st.warning(
-        f"🟠 HIGH-PRIORITY ISSUE: "
-        f"{highest_issue} has a severity score of "
-        f"{highest_severity:.1f}/100."
+        f"🟠 **Priority issue detected:** "
+        f"{highest_issue} currently has the highest severity "
+        f"score at {highest_severity:.1f}/100."
     )
 
 else:
 
     st.success(
-        "No critical customer issue detected."
+        "🟢 No critical customer issue is currently detected."
     )
 
 
 # =========================================================
-# SECTION 1 — SENTIMENT INTELLIGENCE
+# WHAT NEEDS ATTENTION
 # =========================================================
 
 st.markdown("---")
 
-st.header(
-    "1. Customer Sentiment Intelligence"
+st.markdown(
+    "## What Needs Attention?"
 )
+
+if not latest_severity_df.empty:
+
+    top_issue = latest_severity_df.iloc[0]
+
+    issue_name = top_issue["topic_label"]
+
+    severity = top_issue["severity_score"]
+
+    frequency = top_issue.get(
+        "frequency",
+        0
+    )
+
+    negative_ratio = top_issue.get(
+        "negative_ratio",
+        0
+    )
+
+    growth = top_issue.get(
+        "growth_rate",
+        0
+    )
+
+    st.markdown(
+        f"""
+        <div class="insight-box">
+
+        <div class="small-label">Highest Priority Issue</div>
+
+        <h3>{issue_name}</h3>
+
+        <p>
+        This issue has a severity score of
+        <b>{severity:.1f}/100</b>.
+        It appears in approximately
+        <b>{int(frequency):,}</b> reviews in the latest period,
+        with a negative-review ratio of
+        <b>{negative_ratio * 100:.1f}%</b>.
+        </p>
+
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    if growth > 0:
+
+        st.info(
+            f"📈 The issue is growing compared with its previous period "
+            f"({growth * 100:.1f}% growth)."
+        )
+
+    elif growth < 0:
+
+        st.success(
+            f"📉 The issue is declining compared with its previous period "
+            f"({abs(growth) * 100:.1f}% decrease)."
+        )
+
+else:
+
+    st.info(
+        "No issue-prioritization data is available."
+    )
+
+
+# =========================================================
+# SECTION 1 — CUSTOMER HEALTH
+# =========================================================
+
+st.markdown("---")
 
 st.markdown(
-    """
-This section tracks how customer sentiment changes over
-time and identifies periods of increasing dissatisfaction.
-"""
+    "## 1. Customer Sentiment"
 )
 
+st.caption(
+    "How customer satisfaction is changing over time."
+)
 
 if not sentiment_df.empty:
 
@@ -479,7 +601,7 @@ if not sentiment_df.empty:
         x="month",
         y="avg_sentiment",
         markers=True,
-        title="Monthly Customer Sentiment"
+        title="Customer Sentiment Over Time"
     )
 
     fig_sentiment.add_hline(
@@ -498,23 +620,20 @@ if not sentiment_df.empty:
         use_container_width=True
     )
 
-
-    # -----------------------------------------------------
-    # Negative Review Trend
-    # -----------------------------------------------------
-
     if "negative_reviews" in sentiment_df.columns:
 
-        fig_negative = px.bar(
+        fig_negative = px.line(
             sentiment_df,
             x="month",
             y="negative_reviews",
+            markers=True,
             title="Negative Review Volume"
         )
 
         fig_negative.update_layout(
             xaxis_title="Month",
-            yaxis_title="Negative Reviews"
+            yaxis_title="Negative Reviews",
+            hovermode="x unified"
         )
 
         st.plotly_chart(
@@ -524,174 +643,369 @@ if not sentiment_df.empty:
 
 
 # =========================================================
-# SECTION 2 — DISCOVERED TOPICS
+# SENTIMENT INTERPRETATION
+# =========================================================
+
+try:
+
+    explainer = InsightExplainer()
+
+    sentiment_insight = (
+        explainer.explain_sentiment(
+            sentiment_df
+        )
+    )
+
+    st.info(
+        f"💡 {sentiment_insight}"
+    )
+
+except Exception:
+
+    pass
+
+
+# =========================================================
+# SECTION 2 — ISSUE PRIORITIZATION
 # =========================================================
 
 st.markdown("---")
 
-st.header(
-    "2. Customer Discussion Topics"
-)
-
 st.markdown(
-    """
-BERTopic automatically discovers recurring discussion themes
-from customer feedback.
-"""
+    "## 2. Customer Issue Prioritization"
+)
+
+st.caption(
+    "Issues are ranked using negative sentiment, frequency, growth and overall feedback drift."
 )
 
 
-if not topics_df.empty:
+if not latest_severity_df.empty:
 
-    display_topics = topics_df.copy()
+    display_columns = [
+        "topic_label",
+        "severity_score",
+        "severity_level",
+        "frequency",
+        "negative_ratio",
+        "growth_rate"
+    ]
+
+    available_columns = [
+        c
+        for c in display_columns
+        if c in latest_severity_df.columns
+    ]
+
+    display_df = (
+        latest_severity_df[
+            available_columns
+        ].copy()
+    )
+
+    if "negative_ratio" in display_df.columns:
+
+        display_df["negative_ratio"] = (
+            display_df["negative_ratio"] * 100
+        ).round(1)
+
+    if "growth_rate" in display_df.columns:
+
+        display_df["growth_rate"] = (
+            display_df["growth_rate"] * 100
+        ).round(1)
 
     st.dataframe(
-        display_topics,
+        display_df,
         use_container_width=True,
         hide_index=True
     )
 
-
-# =========================================================
-# SECTION 3 — TEMPORAL TOPIC MODELLING
-# =========================================================
-
-st.markdown("---")
-
-st.header(
-    "3. Temporal Topic Evolution"
-)
-
-st.markdown(
-    """
-This view tracks how customer discussion topics emerge,
-grow, decline and persist over time.
-"""
-)
-
-
-if temporal_topics is not None:
-
-    temporal_df = temporal_topics.copy()
-
-    # BERTopic normally returns:
-    # Topic, Words, Frequency, Timestamp
-
-    if not temporal_df.empty:
-
-        temporal_df = (
-            temporal_df.rename(
-                columns={
-                    "Topic": "topic_id",
-                    "Timestamp": "month",
-                    "Frequency": "frequency"
-                }
-            )
-        )
-
-        if "topic_id" in temporal_df.columns:
-
-            temporal_df = temporal_df[
-                temporal_df["topic_id"] != -1
-            ]
-
-            temporal_df["topic_label"] = (
-                temporal_df["topic_id"]
-                .map(topic_mapping)
-                .fillna(
-                    temporal_df["topic_id"]
-                    .astype(str)
-                )
-            )
-
-            if not temporal_df.empty:
-
-                fig_temporal = px.line(
-                    temporal_df,
-                    x="month",
-                    y="frequency",
-                    color="topic_label",
-                    markers=True,
-                    title="Topic Evolution Over Time"
-                )
-
-                fig_temporal.update_layout(
-                    xaxis_title="Time",
-                    yaxis_title="Topic Frequency",
-                    hovermode="x unified"
-                )
-
-                st.plotly_chart(
-                    fig_temporal,
-                    use_container_width=True
-                )
-
-            else:
-
-                st.info(
-                    "No temporal topic data available."
-                )
-
-else:
-
-    st.info(
-        "Temporal topic modelling results are unavailable."
+    fig_severity = px.bar(
+        latest_severity_df.head(10),
+        x="severity_score",
+        y="topic_label",
+        orientation="h",
+        title=f"Highest-Priority Customer Issues — {latest_month}"
     )
 
-
-# =========================================================
-# TOPIC FREQUENCY TREND
-# =========================================================
-
-if not topic_frequency_df.empty:
-
-    st.subheader(
-        "Topic Frequency Trends"
-    )
-
-    fig_topic_frequency = px.line(
-        topic_frequency_df,
-        x="month",
-        y="frequency",
-        color="topic_label",
-        markers=True,
-        title="Customer Topic Frequency"
-    )
-
-    fig_topic_frequency.update_layout(
-        xaxis_title="Month",
-        yaxis_title="Number of Reviews",
-        hovermode="x unified"
+    fig_severity.update_layout(
+        xaxis_title="Severity Impact Score",
+        yaxis_title="Customer Issue",
+        xaxis_range=[0, 100]
     )
 
     st.plotly_chart(
-        fig_topic_frequency,
+        fig_severity,
         use_container_width=True
     )
 
 
 # =========================================================
-# SECTION 4 — SKU HOTSPOTS
+# SECTION 3 — WHAT CHANGED?
+# =========================================================
+
+st.markdown("---")
+
+st.markdown(
+    "## 3. What Changed in Customer Feedback?"
+)
+
+st.caption(
+    "Detects changes in the overall distribution and nature of customer feedback."
+)
+
+
+if not similarity_df.empty:
+
+    latest_drift_row = similarity_df.iloc[-1]
+
+    drift_score = latest_drift_row.get(
+        "concept_drift_score",
+        0
+    )
+
+    cosine = latest_drift_row.get(
+        "cosine_similarity",
+        0
+    )
+
+    topic_drift = latest_drift_row.get(
+        "topic_drift",
+        0
+    )
+
+    sentiment_drift = latest_drift_row.get(
+        "sentiment_drift",
+        0
+    )
+
+    volume_drift = latest_drift_row.get(
+        "volume_drift",
+        0
+    )
+
+    d1, d2, d3, d4 = st.columns(4)
+
+    with d1:
+
+        st.metric(
+            "Feedback Change",
+            f"{drift_score:.2f}"
+        )
+
+    with d2:
+
+        st.metric(
+            "Topic Change",
+            f"{topic_drift:.2f}"
+        )
+
+    with d3:
+
+        st.metric(
+            "Sentiment Change",
+            f"{sentiment_drift:.2f}"
+        )
+
+    with d4:
+
+        st.metric(
+            "Volume Change",
+            f"{volume_drift:.2f}"
+        )
+
+    st.write(
+        f"Current status: **{drift_status}**"
+    )
+
+    fig_drift = px.line(
+        similarity_df,
+        x="current_month",
+        y="concept_drift_score",
+        markers=True,
+        title="Overall Customer Feedback Change"
+    )
+
+    fig_drift.add_hline(
+        y=0.35,
+        line_dash="dash",
+        annotation_text="Change Threshold"
+    )
+
+    fig_drift.update_layout(
+        xaxis_title="Month",
+        yaxis_title="Concept Drift Score",
+        yaxis_range=[0, 1]
+    )
+
+    st.plotly_chart(
+        fig_drift,
+        use_container_width=True
+    )
+
+    if drift_score >= 0.35:
+
+        st.warning(
+            "⚠️ Customer feedback patterns have changed "
+            "significantly compared with the previous period."
+        )
+
+    else:
+
+        st.success(
+            "Customer feedback patterns remain relatively stable."
+        )
+
+
+# =========================================================
+# DRIFT ALERTS
+# =========================================================
+
+alerts = drift_results.get(
+    "alerts",
+    []
+)
+
+if alerts:
+
+    with st.expander("View Detected Drift Alerts"):
+
+        for alert in alerts:
+
+            st.warning(alert)
+
+
+# =========================================================
+# SECTION 4 — TOPIC INTELLIGENCE
+# =========================================================
+
+st.markdown("---")
+
+st.markdown(
+    "## 4. Topic Intelligence"
+)
+
+st.caption(
+    "Explore individual customer discussion themes instead of displaying every topic simultaneously."
+)
+
+
+if not topic_frequency_df.empty:
+
+    topic_options = sorted(
+        topic_frequency_df[
+            "topic_label"
+        ]
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+    topic_options = [
+        topic
+        for topic in topic_options
+        if topic != "outlier"
+    ]
+
+    if topic_options:
+
+        selected_topic = st.selectbox(
+            "Select a customer issue/topic",
+            topic_options
+        )
+
+        selected_topic_df = (
+            topic_frequency_df[
+                topic_frequency_df[
+                    "topic_label"
+                ] == selected_topic
+            ]
+            .sort_values("month")
+        )
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+
+            if not selected_topic_df.empty:
+
+                fig_topic_frequency = px.line(
+                    selected_topic_df,
+                    x="month",
+                    y="frequency",
+                    markers=True,
+                    title=f"{selected_topic}: Review Volume"
+                )
+
+                fig_topic_frequency.update_layout(
+                    xaxis_title="Month",
+                    yaxis_title="Reviews"
+                )
+
+                st.plotly_chart(
+                    fig_topic_frequency,
+                    use_container_width=True
+                )
+
+        with c2:
+
+            if (
+                not selected_topic_df.empty
+                and "topic_sentiment"
+                in selected_topic_df.columns
+            ):
+
+                fig_topic_sentiment = px.line(
+                    selected_topic_df,
+                    x="month",
+                    y="topic_sentiment",
+                    markers=True,
+                    title=f"{selected_topic}: Sentiment"
+                )
+
+                fig_topic_sentiment.add_hline(
+                    y=0,
+                    line_dash="dash"
+                )
+
+                fig_topic_sentiment.update_layout(
+                    xaxis_title="Month",
+                    yaxis_title="Sentiment"
+                )
+
+                st.plotly_chart(
+                    fig_topic_sentiment,
+                    use_container_width=True
+                )
+
+
+# =========================================================
+# SECTION 5 — SKU INTELLIGENCE
 # =========================================================
 
 if "sku" in df.columns:
 
     st.markdown("---")
 
-    st.header(
-        "4. Product / SKU Intelligence"
+    st.markdown(
+        "## 5. Product / SKU Intelligence"
+    )
+
+    st.caption(
+        "Identify products receiving unusually negative customer feedback."
     )
 
     sku_summary = (
         df.groupby("sku")
         .agg(
-            avg_sentiment=(
-                "compound_score",
-                "mean"
-            ),
             total_reviews=(
                 "review",
                 "count"
+            ),
+            avg_sentiment=(
+                "compound_score",
+                "mean"
             ),
             negative_reviews=(
                 "sentiment_label",
@@ -716,22 +1030,40 @@ if "sku" in df.columns:
         )
     )
 
+    sku_display = sku_summary.copy()
+
+    sku_display["avg_sentiment"] = (
+        sku_display["avg_sentiment"]
+        .round(3)
+    )
+
+    sku_display["negative_percentage"] = (
+        sku_display["negative_percentage"]
+        .round(1)
+    )
+
     st.dataframe(
-        sku_summary,
+        sku_display,
         use_container_width=True,
         hide_index=True
     )
 
     fig_sku = px.bar(
-        sku_summary,
-        x="sku",
-        y="avg_sentiment",
-        title="Average Sentiment by SKU"
+        sku_summary.head(10),
+        x="avg_sentiment",
+        y="sku",
+        orientation="h",
+        title="Lowest-Sentiment Products"
     )
 
-    fig_sku.add_hline(
-        y=0,
+    fig_sku.add_vline(
+        x=0,
         line_dash="dash"
+    )
+
+    fig_sku.update_layout(
+        xaxis_title="Average Sentiment",
+        yaxis_title="SKU"
     )
 
     st.plotly_chart(
@@ -741,281 +1073,21 @@ if "sku" in df.columns:
 
 
 # =========================================================
-# SECTION 5 — CONCEPT DRIFT
+# SECTION 6 — RECOMMENDATIONS
 # =========================================================
 
 st.markdown("---")
 
-st.header(
-    "5. Concept Drift Detection"
-)
-
 st.markdown(
-    """
-Concept drift identifies significant changes in customer
-feedback patterns between consecutive time periods.
-
-The system combines:
-
-- Topic distribution drift
-- Sentiment drift
-- Review-volume drift
-"""
+    "## 6. Recommended Corrective Actions"
 )
 
-
-similarity_df = (
-    drift_results["similarity_scores"]
-)
-
-
-if not similarity_df.empty:
-
-    # -----------------------------------------------------
-    # COSINE SIMILARITY
-    # -----------------------------------------------------
-
-    st.subheader(
-        "Topic Distribution Similarity"
-    )
-
-    fig_similarity = px.line(
-        similarity_df,
-        x="current_month",
-        y="cosine_similarity",
-        markers=True,
-        title="Cosine Similarity Between Consecutive Months"
-    )
-
-    fig_similarity.add_hline(
-        y=0.80,
-        line_dash="dash",
-        annotation_text="Drift Threshold"
-    )
-
-    fig_similarity.update_layout(
-        xaxis_title="Month",
-        yaxis_title="Cosine Similarity",
-        yaxis_range=[0, 1]
-    )
-
-    st.plotly_chart(
-        fig_similarity,
-        use_container_width=True
-    )
-
-
-    # -----------------------------------------------------
-    # COMBINED DRIFT
-    # -----------------------------------------------------
-
-    if "concept_drift_score" in similarity_df.columns:
-
-        st.subheader(
-            "Combined Concept Drift Score"
-        )
-
-        fig_combined_drift = px.line(
-            similarity_df,
-            x="current_month",
-            y="concept_drift_score",
-            markers=True,
-            title="Temporal Concept Drift"
-        )
-
-        fig_combined_drift.add_hline(
-            y=0.35,
-            line_dash="dash",
-            annotation_text="Drift Detection Threshold"
-        )
-
-        fig_combined_drift.update_layout(
-            xaxis_title="Month",
-            yaxis_title="Concept Drift Score",
-            yaxis_range=[0, 1]
-        )
-
-        st.plotly_chart(
-            fig_combined_drift,
-            use_container_width=True
-        )
-
-
-    # -----------------------------------------------------
-    # DRIFT TABLE
-    # -----------------------------------------------------
-
-    st.subheader(
-        "Drift Analysis"
-    )
-
-    drift_columns = [
-        "previous_month",
-        "current_month",
-        "cosine_similarity",
-        "topic_drift",
-        "sentiment_drift",
-        "volume_drift",
-        "concept_drift_score"
-    ]
-
-    available_drift_columns = [
-        column
-        for column in drift_columns
-        if column in similarity_df.columns
-    ]
-
-    st.dataframe(
-        similarity_df[
-            available_drift_columns
-        ],
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-# =========================================================
-# SECTION 6 — DRIFT ALERTS
-# =========================================================
-
-st.subheader(
-    "Drift Alerts"
-)
-
-alerts = (
-    drift_results["alerts"]
-)
-
-if alerts:
-
-    for alert in alerts:
-
-        st.warning(
-            alert
-        )
-
-else:
-
-    st.success(
-        "No significant concept drift detected."
-    )
-
-
-# =========================================================
-# SECTION 7 — SEVERITY IMPACT SCORING
-# =========================================================
-
-st.markdown("---")
-
-st.header(
-    "6. Customer Issue Severity & Impact"
-)
-
-st.markdown(
-    """
-The Severity Impact Score prioritizes customer issues using
-four factors:
-
-**Negative Sentiment + Issue Volume + Growth + Concept Drift**
-
-Higher scores indicate issues that require greater attention.
-"""
-)
-
-
-if not severity_df.empty:
-
-    latest_month = (
-        severity_df["month"].max()
-    )
-
-    latest_severity_df = (
-        severity_df[
-            severity_df["month"]
-            == latest_month
-        ]
-        .sort_values(
-            "severity_score",
-            ascending=False
-        )
-    )
-
-    st.subheader(
-        f"Issue Prioritization — {latest_month}"
-    )
-
-    severity_columns = [
-        "topic_label",
-        "severity_score",
-        "severity_level",
-        "frequency",
-        "negative_ratio",
-        "growth_rate",
-        "concept_drift_score"
-    ]
-
-    available_severity_columns = [
-        column
-        for column in severity_columns
-        if column in latest_severity_df.columns
-    ]
-
-    st.dataframe(
-        latest_severity_df[
-            available_severity_columns
-        ],
-        use_container_width=True,
-        hide_index=True
-    )
-
-
-    # -----------------------------------------------------
-    # SEVERITY CHART
-    # -----------------------------------------------------
-
-    fig_severity = px.bar(
-        latest_severity_df,
-        x="topic_label",
-        y="severity_score",
-        color="severity_level",
-        title="Customer Issue Severity"
-    )
-
-    fig_severity.update_layout(
-        xaxis_title="Customer Issue",
-        yaxis_title="Severity Impact Score",
-        yaxis_range=[0, 100]
-    )
-
-    st.plotly_chart(
-        fig_severity,
-        use_container_width=True
-    )
-
-
-# =========================================================
-# SECTION 8 — CORRECTIVE RECOMMENDATIONS
-# =========================================================
-
-st.markdown("---")
-
-st.header(
-    "7. Corrective Recommendations"
-)
-
-st.markdown(
-    """
-The recommendation engine converts detected customer
-feedback patterns into actionable corrective measures.
-"""
+st.caption(
+    "Recommendations generated from the highest-priority customer issues."
 )
 
 
 if not recommendation_df.empty:
-
-    latest_month = (
-        recommendation_df["month"].max()
-    )
 
     latest_recommendations = (
         recommendation_df[
@@ -1026,95 +1098,83 @@ if not recommendation_df.empty:
             "severity_score",
             ascending=False
         )
+        .head(10)
     )
 
-    for _, row in (
-        latest_recommendations
-        .head(10)
-        .iterrows()
-    ):
+    if not latest_recommendations.empty:
 
-        severity_level = (
-            row["severity_level"]
-        )
+        for _, row in (
+            latest_recommendations.iterrows()
+        ):
 
-        severity_score = (
-            row["severity_score"]
-        )
+            severity_level = row[
+                "severity_level"
+            ]
 
-        topic = (
-            row["topic_label"]
-        )
+            severity_score = row[
+                "severity_score"
+            ]
 
-        recommendation = (
-            row["recommendation"]
-        )
+            topic = row[
+                "topic_label"
+            ]
 
-        # -----------------------------------------------
-        # CRITICAL
-        # -----------------------------------------------
+            recommendation = row[
+                "recommendation"
+            ]
 
-        if severity_level == "Critical":
+            if severity_level == "Critical":
 
-            st.error(
-                f"🔴 {topic.upper()} — "
-                f"{severity_level} — "
-                f"{severity_score:.1f}/100"
+                st.error(
+                    f"🔴 **{topic}** — "
+                    f"{severity_score:.1f}/100 — Critical"
+                )
+
+            elif severity_level == "High":
+
+                st.warning(
+                    f"🟠 **{topic}** — "
+                    f"{severity_score:.1f}/100 — High"
+                )
+
+            elif severity_level == "Medium":
+
+                st.info(
+                    f"🟡 **{topic}** — "
+                    f"{severity_score:.1f}/100 — Medium"
+                )
+
+            else:
+
+                st.success(
+                    f"🟢 **{topic}** — "
+                    f"{severity_score:.1f}/100 — Low"
+                )
+
+            st.write(
+                recommendation
             )
 
-        # -----------------------------------------------
-        # HIGH
-        # -----------------------------------------------
-
-        elif severity_level == "High":
-
-            st.warning(
-                f"🟠 {topic.upper()} — "
-                f"{severity_level} — "
-                f"{severity_score:.1f}/100"
-            )
-
-        # -----------------------------------------------
-        # MEDIUM / LOW
-        # -----------------------------------------------
-
-        else:
-
-            st.info(
-                f"🟡 {topic.upper()} — "
-                f"{severity_level} — "
-                f"{severity_score:.1f}/100"
-            )
-
-        st.write(
-            recommendation
-        )
-
-        st.markdown("---")
 
 else:
 
     st.info(
-        "No recommendations generated."
+        "No corrective recommendations are available."
     )
 
 
 # =========================================================
-# SECTION 9 — BUSINESS INSIGHTS
+# SECTION 7 — EXPLAINABLE BUSINESS INSIGHTS
 # =========================================================
 
 st.markdown("---")
 
-st.header(
-    "8. Explainable Business Insights"
+st.markdown(
+    "## 7. Explainable Business Insights"
 )
 
 explainer = InsightExplainer()
 
-
-# ---------------------------------------------------------
-# Sentiment Insight
-# ---------------------------------------------------------
 
 try:
 
@@ -1124,20 +1184,14 @@ try:
         )
     )
 
-    st.markdown(
-        f"### Sentiment Insight\n{sentiment_insight}"
+    st.info(
+        f"**Sentiment:** {sentiment_insight}"
     )
 
 except Exception:
 
-    st.info(
-        "Sentiment insight unavailable."
-    )
+    pass
 
-
-# ---------------------------------------------------------
-# Topic Insight
-# ---------------------------------------------------------
 
 try:
 
@@ -1147,20 +1201,14 @@ try:
         )
     )
 
-    st.markdown(
-        f"### Topic Insight\n{topic_insight}"
+    st.info(
+        f"**Topic:** {topic_insight}"
     )
 
 except Exception:
 
-    st.info(
-        "Topic insight unavailable."
-    )
+    pass
 
-
-# ---------------------------------------------------------
-# Drift Insight
-# ---------------------------------------------------------
 
 try:
 
@@ -1171,29 +1219,48 @@ try:
         )
     )
 
-    st.markdown(
-        f"### Drift Insight\n{drift_insight}"
+    st.info(
+        f"**Change:** {drift_insight}"
     )
 
 except Exception:
 
-    st.info(
-        "Drift insight unavailable."
-    )
+    pass
 
 
 # =========================================================
-# SECTION 10 — PROCESSED DATA
+# SECTION 8 — TOPIC DETAILS
 # =========================================================
 
 st.markdown("---")
 
-st.header(
-    "9. Processed Customer Feedback"
+st.markdown(
+    "## 8. Discovered Topic Details"
+)
+
+if not topics_df.empty:
+
+    topic_display = topics_df.copy()
+
+    st.dataframe(
+        topic_display,
+        use_container_width=True,
+        hide_index=True
+    )
+
+
+# =========================================================
+# SECTION 9 — PROCESSED DATA
+# =========================================================
+
+st.markdown("---")
+
+st.markdown(
+    "## 9. Processed Customer Feedback"
 )
 
 st.caption(
-    "NLP-enriched dataset generated by the intelligence pipeline."
+    "NLP-enriched customer feedback generated by the pipeline."
 )
 
 st.dataframe(
@@ -1212,9 +1279,8 @@ st.markdown("---")
 st.caption(
     """
 Customer Feedback Intelligence System |
-Temporal Topic Modelling • Sentiment Analysis •
+Sentiment Analysis • BERTopic • Temporal Topic Modelling •
 Concept Drift Detection • Severity Impact Scoring •
 Corrective Recommendations
 """
 )
-
