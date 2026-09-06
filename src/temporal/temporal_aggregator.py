@@ -58,6 +58,13 @@ class TemporalAggregator:
         )
 
         # ------------------------------------------------
+        # EXCLUDE BERTopic OUTLIERS
+        # Outlier documents (topic_id = -1) are not
+        # considered business topics.
+        # ------------------------------------------------
+        topic_df = df[df["topic_id"] != -1].copy()
+
+        # ------------------------------------------------
         # TOPIC FREQUENCY
         # ------------------------------------------------
 
@@ -74,11 +81,9 @@ class TemporalAggregator:
             )
 
         topic_frequencies = (
-            df.groupby(topic_group_cols)
+            topic_df.groupby(topic_group_cols)
             .size()
-            .reset_index(
-                name="frequency"
-            )
+            .reset_index(name="frequency")
         )
 
         # ------------------------------------------------
@@ -113,7 +118,7 @@ class TemporalAggregator:
         # ------------------------------------------------
 
         topic_sentiment = (
-            df.groupby(
+            topic_df.groupby(
                 [
                     "month",
                     "topic_id"

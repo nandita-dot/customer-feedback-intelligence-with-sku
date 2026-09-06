@@ -32,7 +32,6 @@ from src.recommendation.recommendation_engine import (
     RecommendationEngine
 )
 
-
 def run_pipeline(df):
 
     # ===================================================
@@ -85,6 +84,18 @@ def run_pipeline(df):
         df.sort_values("date")
         .reset_index(drop=True)
     )
+
+    # ==========================================================
+    # DATA LIMITATION TO TEST THE PIPELINE FOR FASTER EXECUTION
+    # ==========================================================
+
+    MAX_REVIEWS = 5000
+        
+    if len(df) > MAX_REVIEWS:
+        df = (df.sample(n=MAX_REVIEWS, random_state=42)
+            .sort_values("date")
+            .reset_index(drop=True)
+        )
 
     # ===================================================
     # PREPROCESSING

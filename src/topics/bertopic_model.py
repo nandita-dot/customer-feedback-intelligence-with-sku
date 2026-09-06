@@ -4,9 +4,8 @@ from bertopic import BERTopic
 class BERTopicModel:
 
     def __init__(self):
-
         self.model = BERTopic(
-            min_topic_size=2,
+            min_topic_size=5,
             nr_topics=None,
             verbose=False
         )
@@ -30,14 +29,11 @@ class BERTopicModel:
     # ---------------------------------------------------
 
     def get_topics_for_documents(self, documents):
-
         if self.topics is not None:
             return self.topics
-
         topics, _ = self.model.transform(
             documents
         )
-
         return topics
 
     # ---------------------------------------------------
@@ -58,7 +54,6 @@ class BERTopicModel:
                 global_tuning=True
             )
         )
-
         return self.temporal_topics
 
     # ---------------------------------------------------
@@ -88,5 +83,4 @@ class BERTopicModel:
     # ---------------------------------------------------
 
     def get_topic_info(self):
-
         return self.model.get_topic_info()

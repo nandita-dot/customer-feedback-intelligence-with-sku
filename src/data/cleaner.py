@@ -170,20 +170,22 @@ def clean_dataset(df):
     # --------------------------------------------------
 
     cleaned = df[
-        [
-            "review",
-            "review_title",
-            "review_text",
-            "rating",
-            "country",
-            "review_date",
-            "experience_date",
-            "experience_delay_days",
-            "review_count",
-            "review_month",
-            "review_year"
-        ]
-    ].copy()
+    [
+        "review",
+        "review_title",
+        "review_text",
+        "rating",
+        "country",
+        "review_date",
+        "experience_date",
+        "experience_delay_days",
+        "review_count",
+        "review_month",
+        "review_year"
+    ]].copy()
+
+# Existing pipeline expects the column name "date"
+    cleaned["date"] = cleaned["review_date"]
 
     # Reset index
     cleaned.reset_index(drop=True, inplace=True)

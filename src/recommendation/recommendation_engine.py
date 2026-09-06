@@ -1,20 +1,21 @@
 class RecommendationEngine:
     """
-    Generates corrective business recommendations
+    Generates context-aware corrective business recommendations
     from detected customer feedback patterns.
 
-    Important:
-    Multiple BERTopic topic IDs can receive the same
-    business-friendly label.
+    The engine combines:
+        - business topic
+        - severity
+        - sentiment
+        - growth
+        - concept drift
 
-    Example:
-
-        Topic 3  -> delivery
-        Topic 7  -> delivery
-
-    For recommendations, these must be treated as
-    ONE business issue rather than separate issues.
+    The recommendation remains deterministic and explainable.
     """
+
+    # =========================================================
+    # BASE BUSINESS ACTIONS
+    # =========================================================
 
     TOPIC_ACTIONS = {
 
@@ -36,7 +37,7 @@ class RecommendationEngine:
 
         "payment":
             "Review payment processing failures, transaction "
-            "issues and refund handling.",
+            "issues and billing handling.",
 
         "product_performance":
             "Investigate product performance problems and "
@@ -54,6 +55,44 @@ class RecommendationEngine:
             "Perform deeper analysis of recurring customer "
             "complaints to identify the underlying issue."
     }
+
+    # =========================================================
+    # CONDITION-BASED ACTIONS
+    # =========================================================
+
+    SEVERITY_ACTIONS = {
+
+        "Critical":
+            "Escalate the issue immediately to the responsible "
+            "operations or product team.",
+
+        "High":
+            "Prioritize investigation within the current "
+            "review cycle.",
+
+        "Medium":
+            "Monitor the issue and include it in the next "
+            "improvement cycle."
+    }
+
+    GROWTH_ACTION = (
+        "Complaint volume is increasing rapidly, so monitor "
+        "the issue closely and investigate the underlying cause."
+    )
+
+    NEGATIVE_SENTIMENT_ACTION = (
+        "Strong negative sentiment indicates significant "
+        "customer dissatisfaction and requires focused attention."
+    )
+
+    DRIFT_ACTION = (
+        "The issue's characteristics are changing over time, "
+        "so review recent complaints for emerging failure patterns."
+    )
+
+    # =========================================================
+    # GENERATE RECOMMENDATIONS
+    # =========================================================
 
     def generate(self, severity_df):
 
@@ -75,22 +114,12 @@ class RecommendationEngine:
         )
 
         # =====================================================
-        # IMPORTANT FIX
+        # REMOVE DUPLICATE BUSINESS ISSUES
         #
-        # Several BERTopic IDs may have the same business
-        # label.
+        # Multiple BERTopic IDs may map to the same
+        # business-friendly label.
         #
-        # For example:
-        #
-        # topic_id 3  -> delivery
-        # topic_id 8  -> delivery
-        # topic_id 12 -> delivery
-        #
-        # Recommendations must contain only ONE delivery.
-        #
-        # We keep the most severe occurrence because the
-        # recommendation section is intended to prioritize
-        # the most important business issues.
+        # Keep the most severe occurrence.
         # =====================================================
 
         df = (
@@ -107,7 +136,7 @@ class RecommendationEngine:
         )
 
         # =====================================================
-        # GENERATE RECOMMENDATIONS
+        # GENERATE CONTEXT-AWARE RECOMMENDATIONS
         # =====================================================
 
         recommendations = []
@@ -131,8 +160,32 @@ class RecommendationEngine:
                 0
             )
 
+            drift = row.get(
+                "concept_drift_score",
+                0
+            )
+
             # -------------------------------------------------
-            # Base recommendation
+            # Normalize numeric values
+            # -------------------------------------------------
+
+            try:
+                sentiment = float(sentiment)
+            except (TypeError, ValueError):
+                sentiment = 0.0
+
+            try:
+                growth = float(growth)
+            except (TypeError, ValueError):
+                growth = 0.0
+
+            try:
+                drift = float(drift)
+            except (TypeError, ValueError):
+                drift = 0.0
+
+            # -------------------------------------------------
+            # BASE TOPIC ACTION
             # -------------------------------------------------
 
             recommendation = self.TOPIC_ACTIONS.get(
@@ -141,61 +194,38 @@ class RecommendationEngine:
             )
 
             # -------------------------------------------------
-            # Severity-based escalation
+            # SEVERITY
             # -------------------------------------------------
 
-            if severity == "Critical":
+            severity_action = self.SEVERITY_ACTIONS.get(
+                severity
+            )
 
-                recommendation = (
-                    "URGENT: "
-                    + recommendation
-                    + " Escalate the issue to "
-                    "the responsible operations/product team."
-                )
-
-            elif severity == "High":
-
-                recommendation = (
-                    recommendation
-                    + " Prioritize investigation "
-                    "within the current review cycle."
-                )
+            if severity_action:
+                recommendation += " " + severity_action
 
             # -------------------------------------------------
-            # Rapid growth
+            # RAPID GROWTH
             # -------------------------------------------------
-
-            try:
-                growth = float(growth)
-            except (TypeError, ValueError):
-                growth = 0.0
 
             if growth > 0.50:
-
-                recommendation += (
-                    " The issue is experiencing rapid "
-                    "growth and should be monitored closely."
-                )
+                recommendation += " " + self.GROWTH_ACTION
 
             # -------------------------------------------------
-            # Negative sentiment
+            # NEGATIVE SENTIMENT
             # -------------------------------------------------
-
-            try:
-                sentiment = float(sentiment)
-            except (TypeError, ValueError):
-                sentiment = 0.0
 
             if sentiment < -0.30:
+                recommendation += " " + self.NEGATIVE_SENTIMENT_ACTION
 
-                recommendation += (
-                    " Strong negative sentiment indicates "
-                    "customer dissatisfaction is significant."
-                )
+            # -------------------------------------------------
+            # CONCEPT DRIFT
+            # -------------------------------------------------
 
-            recommendations.append(
-                recommendation
-            )
+            if drift >= 0.80:
+                recommendation += " " + self.DRIFT_ACTION
+
+            recommendations.append(recommendation)
 
         # =====================================================
         # ADD RECOMMENDATION COLUMN
@@ -204,7 +234,7 @@ class RecommendationEngine:
         df["recommendation"] = recommendations
 
         # =====================================================
-        # FINAL SORT
+        # FINAL PRIORITY ORDER
         # =====================================================
 
         df = (
