@@ -1,5 +1,21 @@
+# Virtual environment
+.venv/
+
+# Python cache
 __pycache__/
 *.pyc
-.venv/
-data/
-outputs/
+
+# Datasets
+data/*.csv
+data/processed/
+
+# Environment variables / secrets
+.env
+
+# IDE files
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
