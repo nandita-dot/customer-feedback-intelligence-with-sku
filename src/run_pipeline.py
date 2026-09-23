@@ -86,7 +86,7 @@ def run_pipeline(df):
     )
 
     # ==========================================================
-    # DATA LIMITATION TO TEST THE PIPELINE FOR FASTER EXECUTION
+    # REPRESENTATIVE SAMPLING FOR COMPUTATIONAL EFFICIENCY
     # ==========================================================
 
     MAX_REVIEWS = 5000

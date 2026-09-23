@@ -1,9 +1,13 @@
+import hashlib
+from io import BytesIO
+
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
 from src.run_pipeline import run_pipeline
 from src.explainability.explainer import InsightExplainer
+from src.reporting.report_generator import generate_report
 
 
 # =========================================================
@@ -137,9 +141,12 @@ if uploaded_file is None:
 # LOAD DATA
 # =========================================================
 
+file_bytes = uploaded_file.getvalue()
+file_key = hashlib.md5(file_bytes).hexdigest()
+
 try:
 
-    raw_df = pd.read_csv(uploaded_file)
+    raw_df = pd.read_csv(BytesIO(file_bytes))
 
 except Exception as e:
 
@@ -168,26 +175,83 @@ with st.expander("View Raw Dataset"):
 
 
 # =========================================================
-# RUN PIPELINE
+# RUN PIPELINE (cached — download must not rerun BERTopic)
 # =========================================================
 
-with st.spinner(
-    "Running customer intelligence pipeline..."
-):
+cached_key = st.session_state.get("pipeline_cache_key")
+cached_result = st.session_state.get("pipeline_result")
+
+if cached_key == file_key and cached_result is not None:
+
+    results = cached_result
+
+else:
+
+    with st.spinner(
+        "Running customer intelligence pipeline..."
+    ):
+
+        try:
+
+            results = run_pipeline(raw_df)
+
+        except Exception as e:
+
+            st.error(
+                "The customer intelligence pipeline could not be completed."
+            )
+
+            st.exception(e)
+
+            st.stop()
+
+    st.session_state.pipeline_result = results
+    st.session_state.pipeline_cache_key = file_key
+    st.session_state.pipeline_run_count = (
+        st.session_state.get("pipeline_run_count", 0) + 1
+    )
+    st.session_state.report_bytes = None
+    st.session_state.report_cache_key = None
+    st.session_state.report_error = None
+
+if st.session_state.get("report_cache_key") != file_key:
 
     try:
 
-        results = run_pipeline(raw_df)
+        st.session_state.report_bytes = generate_report(results)
+        st.session_state.report_cache_key = file_key
+        st.session_state.report_error = None
 
     except Exception as e:
 
-        st.error(
-            "The customer intelligence pipeline could not be completed."
-        )
+        st.session_state.report_bytes = None
+        st.session_state.report_cache_key = file_key
+        st.session_state.report_error = str(e)
 
-        st.exception(e)
+# =========================================================
+# DOWNLOAD REPORT
+# =========================================================
 
-        st.stop()
+st.sidebar.markdown("---")
+
+if st.session_state.get("report_bytes"):
+
+    st.sidebar.download_button(
+        label="Download Report",
+        data=st.session_state.report_bytes,
+        file_name="customer_feedback_intelligence_report.pdf",
+        mime="application/pdf",
+        use_container_width=True,
+    )
+
+elif st.session_state.get("report_error"):
+
+    st.sidebar.error(
+        "The report could not be generated from the current results."
+    )
+    st.sidebar.caption(
+        st.session_state.report_error
+    )
 
 
 # =========================================================

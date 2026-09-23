@@ -8,3 +8,5 @@ vaderSentiment
 streamlit
 plotly
 scipy
+reportlab
+matplotlib
