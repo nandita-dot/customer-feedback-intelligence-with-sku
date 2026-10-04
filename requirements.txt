@@ -2,11 +2,11 @@ pandas
 numpy
 nltk
 spacy
-gensim
 scikit-learn
 vaderSentiment
+bertopic
+sentence-transformers
 streamlit
 plotly
-scipy
 reportlab
 matplotlib

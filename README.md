@@ -855,6 +855,15 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## 5. Download Language Resources
+
+The preprocessor needs a spaCy model and the NLTK stopword list:
+
+```bash
+python -m spacy download en_core_web_sm
+python -c "import nltk; nltk.download('stopwords')"
+```
+
 ---
 
 # Usage
