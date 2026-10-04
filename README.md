@@ -1191,6 +1191,26 @@ Add formal evaluation for:
 
 ---
 
+# Team PR Helper
+
+A small CLI for checking pull requests. It wraps the [GitHub CLI](https://cli.github.com), so install `gh` and run `gh auth login` once.
+
+```bash
+python -m cli.prs list              # open PRs
+python -m cli.prs mine              # PRs you opened
+python -m cli.prs review            # PRs waiting for your review
+python -m cli.prs view 12           # summary + comments
+python -m cli.prs checks 12         # CI status
+python -m cli.prs files 12          # files changed
+python -m cli.prs diff 12           # full diff
+python -m cli.prs checkout 12       # test the PR branch locally
+python -m cli.prs open 12           # open in browser
+```
+
+Use `--repo OWNER/NAME` before the command to target another repository.
+
+---
+
 # License
 
 This project is licensed under the terms specified in the [`LICENSE`](LICENSE) file.
