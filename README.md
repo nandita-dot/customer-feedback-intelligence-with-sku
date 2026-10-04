@@ -825,7 +825,7 @@ project-root/
 ## 1. Clone the Repository
 
 ```bash
-git clone <YOUR_REPOSITORY_URL>
+git clone https://github.com/nandita-dot/customer-feedback-intelligence-with-sku
 cd customer-feedback-intelligence
 ```
 
