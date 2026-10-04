@@ -776,44 +776,57 @@ The project follows a modular architecture.
 ```text
 project-root/
 │
-├── app.py
+├── main.py                      # outdated script, not used by the app
 ├── requirements.txt
 ├── README.md
 ├── LICENSE
+├── dummy_dataset.csv            # synthetic sample data
 │
-├── assets/
+├── assests/
 │   └── dashboard-preview.png
 │
-├── src/
-│   ├── preprocessing/
-│   │   └── text_preprocessor.py
-│   │
-│   ├── sentiment/
-│   │   └── sentiment_analyzer.py
-│   │
-│   ├── topics/
-│   │   ├── bertopic_model.py
-│   │   └── topic_labeler.py
-│   │
-│   ├── temporal/
-│   │   └── temporal_aggregator.py
-│   │
-│   ├── drift/
-│   │   └── topic_drift_detector.py
-│   │
-│   ├── severity/
-│   │   └── ...
-│   │
-│   ├── recommendations/
-│   │   └── ...
-│   │
-│   ├── explainability/
-│   │   └── explainer.py
-│   │
-│   └── run_pipeline.py
-│
-└── data/
-    └── dummy customer feedback dataset
+└── src/
+    ├── run_pipeline.py          # runs the full analysis pipeline
+    │
+    ├── dashboard/
+    │   └── app.py               # Streamlit dashboard (entry point)
+    │
+    ├── data/
+    │   ├── cleaner.py
+    │   └── validator.py
+    │
+    ├── preprocessing/
+    │   ├── data_loader.py
+    │   └── text_preprocessor.py
+    │
+    ├── sentiment/
+    │   └── sentiment_analyzer.py
+    │
+    ├── topics/
+    │   ├── bertopic_model.py
+    │   └── topic_labeler.py
+    │
+    ├── temporal/
+    │   └── temporal_aggregator.py
+    │
+    ├── drift/
+    │   └── topic_drift_detector.py
+    │
+    ├── severity/
+    │   └── severity_scorer.py
+    │
+    ├── recommendation/
+    │   └── recommendation_engine.py
+    │
+    ├── explainability/
+    │   └── explainer.py
+    │
+    ├── reporting/
+    │   └── report_generator.py  # PDF report export
+    │
+    └── scripts/
+        ├── audit_dataset.py
+        └── prepare_dataset.py
 ```
 
 > The exact file structure may evolve as the project develops.
@@ -825,8 +838,8 @@ project-root/
 ## 1. Clone the Repository
 
 ```bash
-git clone <YOUR_REPOSITORY_URL>
-cd customer-feedback-intelligence
+git clone https://github.com/nandita-dot/customer-feedback-intelligence-with-sku.git
+cd customer-feedback-intelligence-with-sku
 ```
 
 ## 2. Create a Virtual Environment
@@ -859,10 +872,10 @@ pip install -r requirements.txt
 
 # Usage
 
-Start the Streamlit application from the project root:
+Start the Streamlit application from the project root (using `python -m` makes the `src` imports resolve):
 
 ```bash
-streamlit run app.py
+python -m streamlit run src/dashboard/app.py
 ```
 
 Then upload a CSV containing at least:
