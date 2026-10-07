@@ -5,16 +5,19 @@ from io import BytesIO
 
 import streamlit as st
 import pandas as pd
+import numpy as np
 import plotly.express as px
 
 from src.run_pipeline import run_pipeline
 from src.explainability.explainer import InsightExplainer
 from src.reporting.report_generator import generate_report
 from src.step6_inference.feature_pipeline import (
+    FEATURES,
     FROZEN_APPS,
     build_step6_features,
 )
 from src.step6_inference.inference import (
+    OPERATING_CUTOFF,
     load_production_artifact,
     predict_step6,
 )
@@ -33,6 +36,58 @@ st.set_page_config(
 @st.cache_resource
 def _cached_step6_artifact():
     return load_production_artifact()
+
+
+@st.cache_data(show_spinner=False)
+def _cached_step6_features(
+    reviews: pd.DataFrame,
+    source_id: str,
+    app: str,
+    prediction_month: str,
+) -> pd.DataFrame:
+    return build_step6_features(
+        reviews,
+        app=app,
+        prediction_month=prediction_month,
+    )
+
+
+def _add_step6_shap_explanations(
+    predictions: pd.DataFrame,
+    eligible_features: pd.DataFrame,
+) -> pd.DataFrame:
+    artifact = _cached_step6_artifact()
+    transformed = artifact["imputer"].transform(
+        eligible_features.loc[:, FEATURES]
+    )
+    try:
+        import shap
+    except ImportError as error:
+        raise ImportError(
+            "TreeSHAP explanations require the `shap` package."
+        ) from error
+
+    model = artifact["model"]
+    shap_values = shap.TreeExplainer(model).shap_values(transformed)
+    positive_index = list(model.classes_).index(1)
+    if isinstance(shap_values, list):
+        positive_values = np.asarray(shap_values[positive_index])
+    else:
+        positive_values = np.asarray(shap_values)
+        if positive_values.ndim == 3:
+            if positive_values.shape[-1] == len(model.classes_):
+                positive_values = positive_values[:, :, positive_index]
+            elif positive_values.shape[0] == len(model.classes_):
+                positive_values = positive_values[positive_index]
+    if positive_values.shape != (len(eligible_features), len(FEATURES)):
+        raise ValueError(
+            f"Unsupported positive-class SHAP shape: {positive_values.shape}"
+        )
+
+    explained = predictions.copy()
+    for index, feature in enumerate(FEATURES):
+        explained[f"shap_{feature}"] = positive_values[:, index]
+    return explained
 
 
 @st.cache_data(show_spinner=False)
@@ -680,7 +735,8 @@ elif highest_severity >= 50:
 else:
 
     st.success(
-        "🟢 No critical customer issue is currently detected."
+        "No issue meets the dashboard's high-severity threshold "
+        "(50/100). Escalation predictions are shown separately below."
     )
 
 
@@ -1114,28 +1170,29 @@ if inference_months:
         key="run_escalation_inference",
     )
 
-    inference_cache_key = (
-        f"{file_key}:{inference_app}:{inference_month}:{include_explanations}"
-    )
+    inference_cache_key = f"{file_key}:{inference_app}:{inference_month}"
     if run_inference:
         try:
-            inference_features = build_step6_features(
-                raw_df,
-                app=inference_app,
-                prediction_month=inference_month,
+            inference_features = _cached_step6_features(
+                raw_df.loc[:, ["review", "date"]],
+                str(st.session_state.get("active_source_label", "dataset")),
+                inference_app,
+                inference_month,
             )
             eligible_features = inference_features.loc[
                 inference_features["step6_eligible"]
             ].copy()
             if eligible_features.empty:
+                st.session_state["escalation_eligible_features"] = eligible_features
                 st.session_state["escalation_predictions_key"] = inference_cache_key
                 st.session_state["escalation_predictions"] = pd.DataFrame()
             else:
                 predictions = predict_step6(
                     _cached_step6_artifact(),
                     eligible_features,
-                    include_shap=include_explanations,
+                    include_shap=False,
                 )
+                st.session_state["escalation_eligible_features"] = eligible_features
                 st.session_state["escalation_predictions_key"] = inference_cache_key
                 st.session_state["escalation_predictions"] = predictions
         except (FileNotFoundError, ValueError, ImportError) as error:
@@ -1147,11 +1204,37 @@ if inference_months:
         predictions = st.session_state.get("escalation_predictions")
         if predictions is None or predictions.empty:
             st.info(
-                "No issues meet the history requirement for a score in this month. "
-                "An issue must have at least 20 reviews in each of the current "
-                "and prior two months."
+                "Not enough historical data to assess escalation. An issue "
+                "must have at least 20 reviews in each of the current and "
+                "prior two months."
             )
         else:
+            shap_columns = [f"shap_{feature}" for feature in FEATURES]
+            if include_explanations and not set(shap_columns).issubset(predictions.columns):
+                try:
+                    predictions = _add_step6_shap_explanations(
+                        predictions,
+                        st.session_state["escalation_eligible_features"],
+                    )
+                    st.session_state["escalation_predictions"] = predictions
+                except (FileNotFoundError, ValueError, ImportError) as error:
+                    st.error(f"Escalation explanations are unavailable: {error}")
+                except Exception as error:
+                    st.error(f"Unable to display escalation explanations: {error}")
+
+            predicted_issues = predictions.loc[
+                predictions["predicted_escalation"]
+            ]
+            if predicted_issues.empty:
+                st.info("No issues are currently predicted to escalate.")
+            else:
+                issue_probabilities = ", ".join(
+                    f"{str(row['business_category']).replace('_', ' ').title()} "
+                    f"({float(row['escalation_probability']):.0%})"
+                    for _, row in predicted_issues.iterrows()
+                )
+                st.warning(f"Predicted escalation: {issue_probabilities}")
+
             for _, prediction in predictions.sort_values(
                 "escalation_probability", ascending=False
             ).iterrows():
@@ -1175,7 +1258,7 @@ if inference_months:
                         f"{inference_app} · {issue_name} · {inference_month}",
                     )
 
-                    if include_explanations:
+                    if include_explanations and set(shap_columns).issubset(predictions.columns):
                         contribution_columns = {
                             "frequency": "Review volume",
                             "prevalence": "Issue prevalence",
@@ -1219,7 +1302,7 @@ if inference_months:
                         st.json(
                             {
                                 "model_probability": probability,
-                                "operating_cutoff": 0.21,
+                                "operating_cutoff": OPERATING_CUTOFF,
                                 "features": feature_values,
                                 "shap_contributions": (
                                     {
