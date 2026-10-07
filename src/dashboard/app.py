@@ -1,4 +1,6 @@
 import hashlib
+import logging
+from pathlib import Path
 from io import BytesIO
 
 import streamlit as st
@@ -8,6 +10,14 @@ import plotly.express as px
 from src.run_pipeline import run_pipeline
 from src.explainability.explainer import InsightExplainer
 from src.reporting.report_generator import generate_report
+from src.step6_inference.feature_pipeline import (
+    FROZEN_APPS,
+    build_step6_features,
+)
+from src.step6_inference.inference import (
+    load_production_artifact,
+    predict_step6,
+)
 
 
 # =========================================================
@@ -20,6 +30,16 @@ st.set_page_config(
 )
 
 
+@st.cache_resource
+def _cached_step6_artifact():
+    return load_production_artifact()
+
+
+@st.cache_data(show_spinner=False)
+def _read_dataset_csv(path: str, modified_ns: int) -> pd.DataFrame:
+    return pd.read_csv(path)
+
+
 # =========================================================
 # CUSTOM CSS
 # =========================================================
@@ -27,39 +47,42 @@ st.set_page_config(
 st.markdown(
     """
     <style>
-
+    .block-container { padding-top: 2rem; padding-bottom: 3rem; max-width: 1440px; }
     .main-title {
-        font-size: 2.2rem;
+        font-size: 2.55rem;
         font-weight: 700;
-        margin-bottom: 0.2rem;
+        letter-spacing: -0.035em;
+        margin-bottom: 0.35rem;
+        color: #132238;
     }
-
     .subtitle {
-        color: #6b7280;
-        font-size: 1rem;
-        margin-bottom: 1.5rem;
+        color: #5b6878;
+        font-size: 1.08rem;
+        margin-bottom: 1.25rem;
     }
-
     .section-title {
         font-size: 1.45rem;
         font-weight: 650;
         margin-top: 1rem;
     }
-
-    .insight-box {
-        padding: 1rem 1.2rem;
-        border-radius: 10px;
-        background-color: #f7f7f7;
-        margin-bottom: 1rem;
+    div[data-testid="stMetric"] {
+        background-color: #202b3c !important;
+        color: #f8fafc !important;
+        border: 1px solid #3b4b61 !important;
+        border-radius: 12px;
+        padding: 1rem 1.1rem;
     }
-
-    .small-label {
-        font-size: 0.8rem;
-        color: #6b7280;
-        text-transform: uppercase;
-        letter-spacing: 0.04em;
+    div[data-testid="stMetric"] [data-testid="stMetricLabel"],
+    div[data-testid="stMetric"] [data-testid="stMetricLabel"] *,
+    div[data-testid="stMetric"] [data-testid="stMetricValue"],
+    div[data-testid="stMetric"] [data-testid="stMetricValue"] *,
+    div[data-testid="stMetric"] [data-testid="stMetricDelta"],
+    div[data-testid="stMetric"] [data-testid="stMetricDelta"] *,
+    div[data-testid="stMetric"] svg {
+        color: #f8fafc !important;
+        fill: #f8fafc !important;
+        opacity: 1 !important;
     }
-
     </style>
     """,
     unsafe_allow_html=True
@@ -71,15 +94,14 @@ st.markdown(
 # =========================================================
 
 st.markdown(
-    '<div class="main-title">Customer Feedback Intelligence System</div>',
+    '<div class="main-title">Customer Feedback Intelligence</div>',
     unsafe_allow_html=True
 )
 
 st.markdown(
     """
     <div class="subtitle">
-    AI-powered analysis of customer sentiment, discussion topics,
-    changing feedback patterns, issue severity and corrective actions.
+    Turn customer feedback into actionable insights about emerging and escalating issues.
     </div>
     """,
     unsafe_allow_html=True
@@ -87,171 +109,241 @@ st.markdown(
 
 
 # =========================================================
-# SIDEBAR
+# DATASET SELECTION AND ANALYSIS
 # =========================================================
 
-st.sidebar.title("Dashboard Controls")
-
-uploaded_file = st.sidebar.file_uploader(
-    "Upload Customer Feedback CSV",
-    type=["csv"]
+SOURCE_ROOT = Path(__file__).resolve().parents[2]
+SAMPLE_DATASET_PATH = SOURCE_ROOT / "dummy_dataset.csv"
+BUILTIN_DATASET_PATHS = {
+    "Foodpanda": (
+        SOURCE_ROOT
+        / "research_data"
+        / "extracted"
+        / "app-reviews-dataset"
+        / "foodpanda_reviews.csv"
+    ),
+    "Uber Eats": (
+        SOURCE_ROOT
+        / "research_data"
+        / "extracted"
+        / "app-reviews-dataset"
+        / "ubereats_reviews.csv"
+    ),
+    "Zomato": (
+        SOURCE_ROOT
+        / "research_data"
+        / "extracted"
+        / "app-reviews-dataset"
+        / "zomato_reviews.csv"
+    ),
+}
+DATASET_OPTIONS = (
+    "Choose a dataset",
+    "Sample CSV (repository demo)",
+    "Foodpanda",
+    "Uber Eats",
+    "Zomato",
+    "Amazon",
+    "Custom CSV",
 )
 
-
-# =========================================================
-# INITIAL STATE
-# =========================================================
-
-if uploaded_file is None:
-
-    st.info(
-        "Upload a customer feedback CSV file from the sidebar to begin."
+with st.container(border=True):
+    st.subheader("Choose customer feedback")
+    st.caption("Use the repository sample or upload a CSV with `review` and `date` fields.")
+    selected_dataset = st.selectbox(
+        "Choose a dataset",
+        DATASET_OPTIONS,
+        label_visibility="collapsed",
     )
 
-    st.markdown(
-        """
-        ### Expected Dataset
+    uploaded_file = None
+    input_bytes = None
+    source_ready = False
+    source_label = selected_dataset
 
-        Required columns:
-
-        - `review`
-        - `date`
-
-        Optional:
-
-        - `sku`
-
-        ### Intelligence Pipeline
-
-        **Customer Reviews**
-        → Preprocessing
-        → Sentiment Analysis
-        → BERTopic
-        → Temporal Analysis
-        → Concept Drift
-        → Severity Scoring
-        → Recommendations
-        """
+    selected_dataset_path = (
+        SAMPLE_DATASET_PATH
+        if selected_dataset == "Sample CSV (repository demo)"
+        else BUILTIN_DATASET_PATHS.get(selected_dataset)
     )
-
-    st.stop()
-
-
-# =========================================================
-# LOAD DATA
-# =========================================================
-
-file_bytes = uploaded_file.getvalue()
-file_key = hashlib.md5(file_bytes).hexdigest()
-
-try:
-
-    raw_df = pd.read_csv(BytesIO(file_bytes))
-
-except Exception as e:
-
-    st.error(
-        f"Unable to read CSV: {e}"
-    )
-
-    st.stop()
-
-
-# =========================================================
-# RAW DATA
-# =========================================================
-
-with st.expander("View Raw Dataset"):
-
-    st.dataframe(
-        raw_df.head(20),
-        use_container_width=True,
-        hide_index=True
-    )
-
-    st.caption(
-        f"{len(raw_df):,} records loaded."
-    )
-
-
-# =========================================================
-# RUN PIPELINE (cached — download must not rerun BERTopic)
-# =========================================================
-
-cached_key = st.session_state.get("pipeline_cache_key")
-cached_result = st.session_state.get("pipeline_result")
-
-if cached_key == file_key and cached_result is not None:
-
-    results = cached_result
-
-else:
-
-    with st.spinner(
-        "Running customer intelligence pipeline..."
-    ):
-
-        try:
-
-            results = run_pipeline(raw_df)
-
-        except Exception as e:
-
+    if selected_dataset_path is not None:
+        selected_dataset_path = selected_dataset_path.resolve()
+        if not selected_dataset_path.is_file():
             st.error(
-                "The customer intelligence pipeline could not be completed."
+                f"Dataset file is missing: `{selected_dataset_path}`. "
+                "No alternate dataset was loaded."
             )
+        else:
+            try:
+                dataset_mtime_ns = selected_dataset_path.stat().st_mtime_ns
+                selected_dataframe = _read_dataset_csv(
+                    str(selected_dataset_path),
+                    dataset_mtime_ns,
+                )
+                input_bytes = selected_dataset_path.read_bytes()
+                missing_fields = {"review", "date"} - set(selected_dataframe.columns)
+                parsed_dates = pd.to_datetime(
+                    selected_dataframe["date"],
+                    errors="coerce",
+                ) if "date" in selected_dataframe.columns else pd.Series(dtype="datetime64[ns]")
+                valid_dates = parsed_dates.dropna()
+                dataset_diagnostics = {
+                    "resolved_path": str(selected_dataset_path),
+                    "exists": True,
+                    "row_count": len(selected_dataframe),
+                    "columns": list(selected_dataframe.columns),
+                    "parsed_date_min": (
+                        str(valid_dates.min()) if not valid_dates.empty else None
+                    ),
+                    "parsed_date_max": (
+                        str(valid_dates.max()) if not valid_dates.empty else None
+                    ),
+                }
+                logging.getLogger(__name__).info(
+                    "Selected dataset diagnostics: %s",
+                    dataset_diagnostics,
+                )
+                if missing_fields:
+                    st.error(
+                        f"{selected_dataset} cannot be loaded by the existing "
+                        "pipeline. Required fields missing: "
+                        f"{', '.join(sorted(missing_fields))}. "
+                        f"File: `{selected_dataset_path}`."
+                    )
+                elif valid_dates.empty:
+                    st.error(
+                        f"{selected_dataset} has no parseable values in its `date` "
+                        f"column. File: `{selected_dataset_path}`."
+                    )
+                else:
+                    source_ready = True
+                    if selected_dataset == "Sample CSV (repository demo)":
+                        st.caption(
+                            f"Loaded the compatible sample at `{selected_dataset_path.name}`."
+                        )
+            except (OSError, pd.errors.ParserError, UnicodeDecodeError) as error:
+                st.error(
+                    f"Unable to load dataset file `{selected_dataset_path}`: {error}"
+                )
+    elif selected_dataset == "Custom CSV":
+        st.markdown("**Upload your customer feedback CSV**")
+        st.markdown("Required columns: `review`, `date`")
+        uploaded_file = st.file_uploader(
+            "Upload your customer feedback CSV",
+            type=["csv"],
+            key="custom_feedback_csv",
+            label_visibility="collapsed",
+        )
+        if uploaded_file is not None:
+            input_bytes = uploaded_file.getvalue()
+            source_ready = True
+            source_label = uploaded_file.name
+    elif selected_dataset == "Amazon":
+        st.info(
+            "The available Amazon CSV uses `Review Text` and `Date of Experience`, "
+            "not the pipeline's required `review` and `date` fields. It is not "
+            "loaded or silently transformed. Choose Custom CSV with the required fields."
+        )
 
-            st.exception(e)
+    if input_bytes is not None:
+        file_key = hashlib.md5(input_bytes).hexdigest()
+        cached_key = st.session_state.get("pipeline_cache_key")
+        cached_result = st.session_state.get("pipeline_result")
+        already_analyzed = file_key == cached_key and cached_result is not None
+        if already_analyzed:
+            st.success("This dataset has already been analyzed. Cached results are ready.")
+        if st.button(
+            "Analyze Feedback",
+            type="primary",
+            use_container_width=True,
+            disabled=not source_ready,
+        ):
+            try:
+                raw_df = pd.read_csv(BytesIO(input_bytes))
+            except Exception as error:
+                st.error(f"Unable to read CSV: {error}")
+                st.stop()
 
-            st.stop()
+            missing_fields = {"review", "date"} - set(raw_df.columns)
+            if missing_fields:
+                st.error(
+                    "This dataset cannot pass through the existing analysis pipeline. "
+                    f"Required fields missing: {', '.join(sorted(missing_fields))}."
+                )
+                st.stop()
 
-    st.session_state.pipeline_result = results
-    st.session_state.pipeline_cache_key = file_key
-    st.session_state.pipeline_run_count = (
-        st.session_state.get("pipeline_run_count", 0) + 1
-    )
-    st.session_state.report_bytes = None
-    st.session_state.report_cache_key = None
-    st.session_state.report_error = None
+            if file_key == cached_key and cached_result is not None:
+                st.session_state["active_source_label"] = source_label
+            else:
+                with st.spinner("Analyzing customer feedback..."):
+                    try:
+                        results = run_pipeline(raw_df)
+                    except ValueError as error:
+                        st.error(str(error))
+                        st.stop()
+                    except Exception as error:
+                        st.error(
+                            f"The customer intelligence analysis could not be completed: {error}"
+                        )
+                        st.stop()
 
+                st.session_state.pipeline_result = results
+                st.session_state.pipeline_cache_key = file_key
+                st.session_state.pipeline_raw_df = raw_df
+                st.session_state.pipeline_run_count = (
+                    st.session_state.get("pipeline_run_count", 0) + 1
+                )
+                st.session_state.active_source_label = source_label
+                st.session_state.report_bytes = None
+                st.session_state.report_cache_key = None
+                st.session_state.report_error = None
+            st.rerun()
+
+if selected_dataset == "Choose a dataset":
+    st.info("Select a dataset above to begin.")
+
+active_results = st.session_state.get("pipeline_result")
+active_file_key = st.session_state.get("pipeline_cache_key")
+current_source_key = (
+    hashlib.md5(input_bytes).hexdigest() if input_bytes is not None else None
+)
+if (
+    active_results is None
+    or current_source_key is None
+    or current_source_key != active_file_key
+):
+    st.stop()
+
+raw_df = st.session_state.pipeline_raw_df
+results = active_results
+file_key = active_file_key
+
+with st.expander("Preview uploaded dataset"):
+    st.dataframe(raw_df.head(20), use_container_width=True, hide_index=True)
+    st.caption(f"{len(raw_df):,} records loaded from {st.session_state.get('active_source_label', 'dataset')}.")
+
+st.sidebar.title("Your analysis")
 if st.session_state.get("report_cache_key") != file_key:
-
     try:
-
         st.session_state.report_bytes = generate_report(results)
         st.session_state.report_cache_key = file_key
         st.session_state.report_error = None
-
-    except Exception as e:
-
+    except Exception as error:
         st.session_state.report_bytes = None
         st.session_state.report_cache_key = file_key
-        st.session_state.report_error = str(e)
-
-# =========================================================
-# DOWNLOAD REPORT
-# =========================================================
-
-st.sidebar.markdown("---")
+        st.session_state.report_error = str(error)
 
 if st.session_state.get("report_bytes"):
-
     st.sidebar.download_button(
-        label="Download Report",
+        label="Download PDF report",
         data=st.session_state.report_bytes,
         file_name="customer_feedback_intelligence_report.pdf",
         mime="application/pdf",
         use_container_width=True,
     )
-
 elif st.session_state.get("report_error"):
-
-    st.sidebar.error(
-        "The report could not be generated from the current results."
-    )
-    st.sidebar.caption(
-        st.session_state.report_error
-    )
+    st.sidebar.error("The report could not be generated.")
+    st.sidebar.caption(st.session_state.report_error)
 
 
 # =========================================================
@@ -259,6 +351,29 @@ elif st.session_state.get("report_error"):
 # =========================================================
 
 df = results["processed_df"].copy()
+
+analysis_metadata = results.get("analysis_metadata", {})
+uploaded_review_count = analysis_metadata.get(
+    "uploaded_reviews",
+    len(raw_df),
+)
+reviews_analyzed = analysis_metadata.get(
+    "reviews_analyzed",
+    len(df),
+)
+
+st.info(
+    f"**Uploaded reviews:** {uploaded_review_count:,}  \n"
+    f"**Reviews analyzed:** {reviews_analyzed:,}"
+)
+
+if analysis_metadata.get("sampling_applied", False):
+    sample_size = analysis_metadata.get("sample_size", 5000)
+    st.warning(
+        f"Analysis uses a {sample_size:,}-row sample. "
+        "Dashboard metrics, charts, and recommendations represent this "
+        "sample, not the full upload."
+    )
 
 topics_df = results["topics_df"].copy()
 
@@ -491,7 +606,7 @@ if not similarity_df.empty:
 st.markdown("---")
 
 st.markdown(
-    "## Executive Intelligence Overview"
+    "## Executive Overview"
 )
 
 st.caption(
@@ -508,14 +623,14 @@ col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
 
     st.metric(
-        "Total Reviews",
+        "Reviews analyzed",
         f"{total_reviews:,}"
     )
 
 with col2:
 
     st.metric(
-        "Topics Discovered",
+        "Issues detected",
         valid_topics
     )
 
@@ -529,14 +644,15 @@ with col3:
 with col4:
 
     st.metric(
-        "Negative Reviews",
+        "Negative feedback",
         f"{latest_negative_percentage:.1f}%"
     )
 
 with col5:
 
     st.metric(
-        "Highest Issue Severity",
+        "Highest-priority issue",
+        str(highest_issue).replace("_", " ").title(),
         f"{highest_severity:.1f}/100"
     )
 
@@ -675,7 +791,7 @@ else:
 st.markdown("---")
 
 st.markdown(
-    "## 1. Customer Sentiment"
+    "## Customer sentiment over time"
 )
 
 st.caption(
@@ -760,7 +876,7 @@ except Exception:
 st.markdown("---")
 
 st.markdown(
-    "## 2. Customer Issue Prioritization"
+    "## What are customers talking about?"
 )
 
 st.caption(
@@ -772,11 +888,12 @@ if not latest_severity_df.empty:
 
     display_columns = [
         "topic_label",
+        "frequency",
+        "topic_sentiment",
+        "negative_ratio",
+        "growth_rate",
         "severity_score",
         "severity_level",
-        "frequency",
-        "negative_ratio",
-        "growth_rate"
     ]
 
     available_columns = [
@@ -790,17 +907,28 @@ if not latest_severity_df.empty:
             available_columns
         ].copy()
     )
+    display_df = display_df.rename(
+        columns={
+            "topic_label": "Issue",
+            "frequency": "Mentions",
+            "topic_sentiment": "Average sentiment",
+            "negative_ratio": "Negative feedback (%)",
+            "growth_rate": "Change in mentions (%)",
+            "severity_score": "Priority score",
+            "severity_level": "Priority",
+        }
+    )
 
-    if "negative_ratio" in display_df.columns:
+    if "Negative feedback (%)" in display_df.columns:
 
-        display_df["negative_ratio"] = (
-            display_df["negative_ratio"] * 100
+        display_df["Negative feedback (%)"] = (
+            display_df["Negative feedback (%)"] * 100
         ).round(1)
 
-    if "growth_rate" in display_df.columns:
+    if "Change in mentions (%)" in display_df.columns:
 
-        display_df["growth_rate"] = (
-            display_df["growth_rate"] * 100
+        display_df["Change in mentions (%)"] = (
+            display_df["Change in mentions (%)"] * 100
         ).round(1)
 
     st.dataframe(
@@ -836,7 +964,7 @@ if not latest_severity_df.empty:
 st.markdown("---")
 
 st.markdown(
-    "## 3. What Changed in Customer Feedback?"
+    "## How are issues changing over time?"
 )
 
 st.caption(
@@ -947,6 +1075,172 @@ if not similarity_df.empty:
 
 
 # =========================================================
+# ESCALATION INTELLIGENCE
+# =========================================================
+
+st.markdown("---")
+st.markdown("## Escalation Intelligence")
+st.caption(
+    "Identifies issues showing patterns associated with future escalation "
+    "based on historical feedback trends. This is a model inference score, "
+    "not a calculation of future outcomes."
+)
+
+inference_months = sorted(
+    pd.to_datetime(raw_df["date"], errors="coerce")
+    .dropna()
+    .dt.to_period("M")
+    .astype(str)
+    .unique()
+)
+
+if inference_months:
+    inference_app = st.selectbox(
+        "Which app does this feedback represent?",
+        FROZEN_APPS,
+        help="Select the app identity used to contextualize this upload.",
+    )
+    inference_month = st.selectbox(
+        "As-of month",
+        inference_months,
+        index=len(inference_months) - 1,
+    )
+    include_explanations = st.checkbox(
+        "Show why each issue received its score",
+        value=False,
+    )
+    run_inference = st.button(
+        "View escalation signals",
+        key="run_escalation_inference",
+    )
+
+    inference_cache_key = (
+        f"{file_key}:{inference_app}:{inference_month}:{include_explanations}"
+    )
+    if run_inference:
+        try:
+            inference_features = build_step6_features(
+                raw_df,
+                app=inference_app,
+                prediction_month=inference_month,
+            )
+            eligible_features = inference_features.loc[
+                inference_features["step6_eligible"]
+            ].copy()
+            if eligible_features.empty:
+                st.session_state["escalation_predictions_key"] = inference_cache_key
+                st.session_state["escalation_predictions"] = pd.DataFrame()
+            else:
+                predictions = predict_step6(
+                    _cached_step6_artifact(),
+                    eligible_features,
+                    include_shap=include_explanations,
+                )
+                st.session_state["escalation_predictions_key"] = inference_cache_key
+                st.session_state["escalation_predictions"] = predictions
+        except (FileNotFoundError, ValueError, ImportError) as error:
+            st.error(f"Escalation intelligence is unavailable: {error}")
+        except Exception as error:
+            st.error(f"Unable to display escalation intelligence: {error}")
+
+    if st.session_state.get("escalation_predictions_key") == inference_cache_key:
+        predictions = st.session_state.get("escalation_predictions")
+        if predictions is None or predictions.empty:
+            st.info(
+                "No issues meet the history requirement for a score in this month. "
+                "An issue must have at least 20 reviews in each of the current "
+                "and prior two months."
+            )
+        else:
+            for _, prediction in predictions.sort_values(
+                "escalation_probability", ascending=False
+            ).iterrows():
+                issue_name = str(prediction["business_category"]).replace("_", " ").title()
+                probability = float(prediction["escalation_probability"])
+                predicted_status = (
+                    "Predicted escalation"
+                    if prediction["predicted_escalation"]
+                    else "Not predicted escalation"
+                )
+                with st.container(border=True):
+                    st.markdown(f"### {issue_name}")
+                    issue_columns = st.columns(3)
+                    issue_columns[0].metric(
+                        "Escalation probability",
+                        f"{probability:.0%}",
+                    )
+                    issue_columns[1].metric("Predicted status", predicted_status)
+                    issue_columns[2].metric(
+                        "App · Category · Month",
+                        f"{inference_app} · {issue_name} · {inference_month}",
+                    )
+
+                    if include_explanations:
+                        contribution_columns = {
+                            "frequency": "Review volume",
+                            "prevalence": "Issue prevalence",
+                            "prevalence_growth": "Prevalence growth",
+                            "growth_acceleration": "Growth acceleration",
+                            "negative_ratio": "Negative feedback",
+                            "negative_ratio_change": "Change in negative feedback",
+                            "persistence": "Issue persistence",
+                        }
+                        contributions = pd.DataFrame(
+                            [
+                                {
+                                    "Factor": contribution_columns[feature],
+                                    "Contribution": float(prediction[f"shap_{feature}"]),
+                                }
+                                for feature in contribution_columns
+                            ]
+                        ).sort_values("Contribution", ascending=False)
+                        st.markdown("**Factors contributing to this score**")
+                        st.caption(
+                            "Positive contributions support the escalation class; "
+                            "negative contributions pull the score away from it."
+                        )
+                        st.bar_chart(
+                            contributions.set_index("Factor"),
+                            horizontal=True,
+                        )
+                    with st.expander("Technical details"):
+                        feature_values = {
+                            feature: prediction[feature]
+                            for feature in (
+                                "frequency",
+                                "prevalence",
+                                "prevalence_growth",
+                                "growth_acceleration",
+                                "negative_ratio",
+                                "negative_ratio_change",
+                                "persistence",
+                            )
+                        }
+                        st.json(
+                            {
+                                "model_probability": probability,
+                                "operating_cutoff": 0.21,
+                                "features": feature_values,
+                                "shap_contributions": (
+                                    {
+                                        feature: float(prediction[f"shap_{feature}"])
+                                        for feature in feature_values
+                                    }
+                                    if include_explanations
+                                    else None
+                                ),
+                            }
+                        )
+            st.caption(
+                "Signals use historical review patterns available through the "
+                "selected month. They do not state or calculate whether a future "
+                "escalation actually occurred."
+            )
+else:
+    st.info("No valid dates are available for escalation inference.")
+
+
+# =========================================================
 # DRIFT ALERTS
 # =========================================================
 
@@ -971,7 +1265,7 @@ if alerts:
 st.markdown("---")
 
 st.markdown(
-    "## 4. Topic Intelligence"
+    "## Explore an issue"
 )
 
 st.caption(
@@ -1077,7 +1371,7 @@ if "sku" in df.columns:
     st.markdown("---")
 
     st.markdown(
-        "## 5. Product / SKU Intelligence"
+        "## Product / SKU insights"
     )
 
     st.caption(
@@ -1167,7 +1461,7 @@ if "sku" in df.columns:
 st.markdown("---")
 
 st.markdown(
-    "## 6. Recommended Corrective Actions"
+    "## Recommended actions"
 )
 
 st.caption(
@@ -1258,7 +1552,7 @@ else:
 st.markdown("---")
 
 st.markdown(
-    "## 7. Explainable Business Insights"
+    "## Additional business insights"
 )
 
 explainer = InsightExplainer()
@@ -1323,7 +1617,7 @@ except Exception:
 st.markdown("---")
 
 st.markdown(
-    "## 8. Discovered Topic Details"
+    "## Discovered topic details"
 )
 
 if not topics_df.empty:
@@ -1401,7 +1695,7 @@ if not topics_df.empty:
 st.markdown("---")
 
 st.markdown(
-    "## 9. Processed Customer Feedback"
+    "## Processed review data"
 )
 
 st.caption(

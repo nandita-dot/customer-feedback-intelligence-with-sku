@@ -42,6 +42,18 @@ The system combines:
 
 The application follows a modular architecture so that individual analytical components can be improved without unnecessarily changing the entire pipeline.
 
+### Production Analytics vs. Frozen Research Features
+
+The Streamlit/production pipeline includes broader analytics such as feedback
+drift detection, severity scoring, and average sentiment. The completed
+research experiment is narrower and uses only these seven predictive
+features: `frequency`, `prevalence`, `prevalence_growth`,
+`growth_acceleration`, `negative_ratio`, `negative_ratio_change`, and
+`persistence`. BERTopic is descriptive-only. Semantic/topic drift, mean
+sentiment, and mean-sentiment change are not predictive features in the final
+experiment. See
+[`research/audit/step6/final_clean/step6_final_report.md`](research/audit/step6/final_clean/step6_final_report.md).
+
 ---
 
 ## Problem Statement
@@ -855,14 +867,37 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
+## 5. Install NLP Resources
+
+The application requires the spaCy English model and NLTK English stopwords.
+Install these resources once in the activated environment; the application
+does not download them at runtime:
+
+```bash
+python -m spacy download en_core_web_sm
+python -c "import nltk; nltk.download('stopwords')"
+```
+
+BERTopic's default embedding model is `all-MiniLM-L6-v2`. Before the demo,
+pre-cache its weights while internet access is available:
+
+```bash
+python -c "from sentence_transformers import SentenceTransformer; SentenceTransformer('all-MiniLM-L6-v2')"
+```
+
+This is a one-time setup step; the application does not run package or
+resource installers. If the model is not cached, BERTopic may attempt to
+retrieve it when analysis starts.
+
 ---
 
 # Usage
 
-Start the Streamlit application from the project root:
+The Streamlit dashboard is the canonical application entry point. From the
+repository root, start it with:
 
 ```bash
-streamlit run app.py
+python -m streamlit run src/dashboard/app.py
 ```
 
 Then upload a CSV containing at least:

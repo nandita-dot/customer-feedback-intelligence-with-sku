@@ -39,6 +39,7 @@ class TopicLabeler:
             "worth",
             "affordable",
             "fee",
+            "fees",
             "charge"
         ],
 
@@ -55,12 +56,16 @@ class TopicLabeler:
             "damaged",
             "poor",
             "faulty",
-            "failure"
+            "failure",
+            "incorrect",
+            "orders"
         ],
 
         "support": [
             "support",
             "customer_support",
+            "service",
+            "customer_care",
             "respond",
             "responded",
             "response",
@@ -103,7 +108,8 @@ class TopicLabeler:
             "function",
             "functioning",
             "battery",
-            "overheat"
+            "overheat",
+            "updates"
         ],
 
         "usability": [
@@ -111,6 +117,7 @@ class TopicLabeler:
             "difficult",
             "interface",
             "app",
+            "apps",
             "application",
             "website",
             "navigation",

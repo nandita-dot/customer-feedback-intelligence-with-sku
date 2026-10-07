@@ -4,6 +4,9 @@ nltk
 spacy
 gensim
 scikit-learn
+joblib
+shap
+bertopic
 vaderSentiment
 streamlit
 plotly

@@ -58,6 +58,7 @@ def run_pipeline(df):
     # CLEAN DATA
     # ===================================================
 
+    uploaded_review_count = len(df)
     df = df.copy()
 
     df["review"] = (
@@ -85,13 +86,23 @@ def run_pipeline(df):
         .reset_index(drop=True)
     )
 
+    if df.empty:
+        raise ValueError(
+            "No valid reviews remain after validation and cleaning. "
+            "Check that the CSV has non-empty 'review' values and parseable "
+            "'date' values, then try again."
+        )
+
+    valid_review_count = len(df)
+
     # ==========================================================
     # REPRESENTATIVE SAMPLING FOR COMPUTATIONAL EFFICIENCY
     # ==========================================================
 
     MAX_REVIEWS = 5000
-        
-    if len(df) > MAX_REVIEWS:
+    sampling_applied = valid_review_count > MAX_REVIEWS
+
+    if sampling_applied:
         df = (df.sample(n=MAX_REVIEWS, random_state=42)
             .sort_values("date")
             .reset_index(drop=True)
@@ -122,6 +133,13 @@ def run_pipeline(df):
     df["cleaned_review"] = (
         cleaned_reviews
     )
+
+    if not df["cleaned_review"].str.strip().ne("").any():
+        raise ValueError(
+            "No valid reviews remain after validation and cleaning. "
+            "Check that the CSV review text contains meaningful words and "
+            "that its dates are parseable, then try again."
+        )
 
     # ===================================================
     # SENTIMENT
@@ -333,6 +351,13 @@ def run_pipeline(df):
 
         "processed_df":
             df,
+
+        "analysis_metadata": {
+            "uploaded_reviews": uploaded_review_count,
+            "reviews_analyzed": len(df),
+            "sampling_applied": sampling_applied,
+            "sample_size": MAX_REVIEWS if sampling_applied else None,
+        },
 
         "topics_df":
             topics_df,
